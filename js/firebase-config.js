@@ -4,7 +4,7 @@
 // Règles de sécurité recommandées (Realtime Database > Règles) :
 // { "rules": { ".read": true, ".write": true } }
 
-const firebaseConfig = {
+const FIREBASE_CONFIG = {
     apiKey: "AIzaSyDJhclEoSAsccSq_dJMpJXdJFoVgLXt9t8",
     authDomain: "coopception.firebaseapp.com",
     databaseURL: "https://coopception-default-rtdb.asia-southeast1.firebasedatabase.app",
