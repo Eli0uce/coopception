@@ -6,7 +6,24 @@
   <title>STATION ZÉRO — Lobby</title>
   <link rel="stylesheet" href="css/main.css">
   <style>
-    body { display:flex;align-items:center;justify-content:center;min-height:100vh; }
+    body {
+      display:flex;align-items:center;justify-content:center;min-height:100vh;
+      background-color: #020408;
+      background-image:
+        radial-gradient(circle 1px at 10% 20%, rgba(255,255,255,0.6) 0%, transparent 100%),
+        radial-gradient(circle 1px at 25% 65%, rgba(255,255,255,0.5) 0%, transparent 100%),
+        radial-gradient(circle 1px at 40% 10%, rgba(255,255,255,0.7) 0%, transparent 100%),
+        radial-gradient(circle 1px at 55% 80%, rgba(255,255,255,0.4) 0%, transparent 100%),
+        radial-gradient(circle 1px at 70% 35%, rgba(255,255,255,0.6) 0%, transparent 100%),
+        radial-gradient(circle 1px at 80% 55%, rgba(255,255,255,0.5) 0%, transparent 100%),
+        radial-gradient(circle 1px at 90% 15%, rgba(255,255,255,0.7) 0%, transparent 100%),
+        radial-gradient(circle 1px at 15% 90%, rgba(255,255,255,0.4) 0%, transparent 100%),
+        radial-gradient(circle 1px at 60% 50%, rgba(255,255,255,0.3) 0%, transparent 100%),
+        radial-gradient(circle 1px at 35% 40%, rgba(255,255,255,0.5) 0%, transparent 100%),
+        radial-gradient(circle 1px at 85% 75%, rgba(255,255,255,0.6) 0%, transparent 100%),
+        radial-gradient(circle 2px at 50% 25%, rgba(0,255,65,0.2) 0%, transparent 100%),
+        radial-gradient(ellipse 60% 40% at 50% 50%, rgba(0,10,20,0.8) 0%, rgba(2,4,8,1) 100%);
+    }
     .lobby-wrap { width:480px;text-align:center; }
     .logo { font-family:'VT323',monospace;font-size:80px;color:var(--green);text-shadow:var(--glow);line-height:1; }
     .subtitle { color:var(--green-dim);letter-spacing:4px;font-size:13px;margin-bottom:40px; }

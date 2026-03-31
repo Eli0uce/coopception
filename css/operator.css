@@ -1,5 +1,35 @@
 :root { --role-color: var(--amber); }
 
+/* ── Fond : salle mécanique industrielle ─────────────────────── */
+body {
+  background-color: #0a0600;
+  background-image:
+    /* Plaques métalliques rivées (grille) */
+    repeating-linear-gradient(90deg, transparent, transparent 78px, rgba(255,176,0,0.05) 78px, rgba(255,176,0,0.05) 80px),
+    repeating-linear-gradient(0deg, transparent, transparent 78px, rgba(255,176,0,0.05) 78px, rgba(255,176,0,0.05) 80px),
+    /* Vignette centrale */
+    radial-gradient(ellipse 90% 70% at 50% 50%, rgba(30,15,0,0.85) 0%, rgba(10,6,0,1) 100%);
+}
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background:
+    /* Rivets aux intersections */
+    radial-gradient(circle 3px at 80px 80px, rgba(255,176,0,0.15) 0%, transparent 100%),
+    radial-gradient(circle 3px at 160px 80px, rgba(255,176,0,0.1) 0%, transparent 100%),
+    radial-gradient(circle 3px at 80px 160px, rgba(255,176,0,0.12) 0%, transparent 100%),
+    radial-gradient(circle 3px at 160px 160px, rgba(255,176,0,0.15) 0%, transparent 100%),
+    /* Lueur des vannes (gauche/droite) */
+    radial-gradient(ellipse 15% 40% at 2% 50%, rgba(255,80,0,0.08) 0%, transparent 100%),
+    radial-gradient(ellipse 15% 40% at 98% 50%, rgba(255,80,0,0.06) 0%, transparent 100%),
+    /* Lueur au sol (chaleur) */
+    radial-gradient(ellipse 80% 15% at 50% 100%, rgba(255,120,0,0.07) 0%, transparent 100%);
+  pointer-events: none;
+  z-index: 0;
+}
+.oper-layout { position: relative; z-index: 1; }
+
 .oper-layout {
   display: grid;
   grid-template-rows: auto 1fr auto;
