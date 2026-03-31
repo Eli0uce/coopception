@@ -17,21 +17,24 @@ async function createRoom() {
     document.getElementById('create-init').style.display = 'none';
     document.getElementById('create-waiting').style.display = 'block';
     document.getElementById('room-code-text').textContent = code;
+    AudioManager.connect();
 
     GameDB.onRoomReady(() => {
+      AudioManager.connect();
       document.getElementById('create-waiting').innerHTML +=
         '<div style="color:var(--green);margin-top:10px;font-size:13px;letter-spacing:2px;">✅ Opérateur connecté ! Redirection...</div>';
       setTimeout(() => { window.location.href = 'technician.html'; }, 800);
     });
   } catch(e) {
     btn.textContent = '⚡ CRÉER LA ROOM'; btn.disabled = false;
+    AudioManager.error();
     showError('create-error', e.message);
   }
 }
 
 async function joinRoom() {
   const code = document.getElementById('input-code').value.toUpperCase().trim();
-  if (code.length !== 4) { showError('error-msg', '⚠ Le code doit faire 4 caractères.'); return; }
+  if (code.length !== 4) { AudioManager.error(); showError('error-msg', '⚠ Le code doit faire 4 caractères.'); return; }
   document.getElementById('error-msg').textContent = '';
   const btn = document.querySelector('#tab-join .btn');
   btn.textContent = '⏳ CONNEXION...'; btn.disabled = true;
@@ -39,9 +42,11 @@ async function joinRoom() {
     await GameDB.joinRoom(code);
     sessionStorage.setItem('sz_role', 'operator');
     sessionStorage.setItem('sz_room', code);
+    AudioManager.connect();
     window.location.href = 'operator.html';
   } catch(e) {
     btn.textContent = '🔗 REJOINDRE'; btn.disabled = false;
+    AudioManager.error();
     showError('error-msg', '⚠ ' + e.message);
   }
 }
@@ -55,4 +60,3 @@ document.getElementById('input-code').addEventListener('keydown', e => {
   if (e.key === 'Enter') joinRoom();
   setTimeout(() => { e.target.value = e.target.value.toUpperCase(); }, 0);
 });
-

@@ -604,16 +604,21 @@
 <script src="js/firebase-config.js"></script>
 <script src="js/puzzles.js"></script>
 <script src="js/firebase-db.js"></script>
+<script src="js/audio.js"></script>
 <script src="js/lobby.js"></script>
 
 <script>
 // ── Navigation ───────────────────────────────────────────────
 function showScreen(name) {
+  AudioManager.init();
+  AudioManager.click();
   document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
   document.getElementById('screen-' + name).classList.remove('hidden');
 }
 
 function switchTab(name) {
+  AudioManager.init();
+  AudioManager.click();
   document.querySelectorAll('.tab').forEach((t, i) =>
     t.classList.toggle('active', (name==='create'&&i===0)||(name==='join'&&i===1)));
   document.getElementById('tab-create').classList.toggle('active', name==='create');
@@ -639,22 +644,30 @@ function switchTab(name) {
   }
 })();
 
+// Sons hover sur tous les boutons menu
+document.querySelectorAll('.menu-btn').forEach(btn => {
+  btn.addEventListener('mouseenter', () => { AudioManager.init(); AudioManager.hover(); });
+});
+
 // ── Horloge ──────────────────────────────────────────────────
 function updateClock() {
   const now = new Date();
-  document.getElementById('status-time').textContent =
-    now.toTimeString().slice(0,8);
+  document.getElementById('status-time').textContent = now.toTimeString().slice(0,8);
 }
 setInterval(updateClock, 1000); updateClock();
 
 // ── Paramètres ───────────────────────────────────────────────
 function saveSetting(key, val) {
   localStorage.setItem('sz_' + key, String(val));
+  AudioManager.init();
+  AudioManager.beep(val ? 880 : 440);
+  if (key === 'sfx')   AudioManager.setSfxEnabled(val);
+  if (key === 'music') AudioManager.setMusicEnabled(val);
 }
 function loadSettings() {
   const crt    = localStorage.getItem('sz_crt')    !== 'false';
   const glitch = localStorage.getItem('sz_glitch') !== 'false';
-  const sfx    = localStorage.getItem('sz_sfx')    === 'true';
+  const sfx    = localStorage.getItem('sz_sfx')    !== 'false'; // activé par défaut
   const music  = localStorage.getItem('sz_music')  === 'true';
   const timer  = localStorage.getItem('sz_timer')  || '900';
 
@@ -676,11 +689,20 @@ function toggleGlitch(on) {
   });
 }
 function toggleFullscreen() {
+  AudioManager.init(); AudioManager.click();
   if (!document.fullscreenElement) document.documentElement.requestFullscreen();
   else document.exitFullscreen();
 }
 
 loadSettings();
+
+// ── Init audio + musique au premier clic ─────────────────────
+document.addEventListener('click', function onFirstClick() {
+  AudioManager.init();
+  AudioManager.boot();
+  if (localStorage.getItem('sz_music') === 'true') AudioManager.startMusic();
+  document.removeEventListener('click', onFirstClick);
+}, { once: true });
 
 // ── Entrée sur la touche ENTER pour rejoindre ─────────────────
 document.getElementById('input-code').addEventListener('keydown', e => {

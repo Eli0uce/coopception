@@ -11,6 +11,8 @@ if (!roomCode) { location.href = 'index.html'; }
 
 // Rétablir la présence Firebase et attendre avant de setup les listeners
 GameDB.rejoinRoom(roomCode, 'technician').then(() => {
+  AudioManager.init();
+  AudioManager.boot();
   VoiceChat.init('technician', roomCode, GameDB.getDb());
   setupListeners();
 });
@@ -62,9 +64,13 @@ function startTimerLoop() {
     if (left <= 0) {
       clearInterval(timerInterval);
       setTimer(0);
+      AudioManager.stopAlarm();
       GameDB.triggerTimeout();
     } else {
       setTimer(left);
+      if (left === 60) AudioManager.startAlarm();
+      if (left <= 10)  AudioManager.countdownUrgent();
+      else if (left <= 30 && left % 5 === 0) AudioManager.countdown();
     }
   }, 1000);
 }
@@ -179,11 +185,16 @@ function setupListeners() {
       if (!startTimestamp && state.startTimestamp) {
         startTimestamp = state.startTimestamp;
         startTimerLoop();
+        AudioManager.gameStart();
       }
-      showPuzzle(state.currentPuzzle || 0);
+      const idx = state.currentPuzzle || 0;
+      if (idx > 0 && idx !== lastPuzzleIndex) AudioManager.puzzleNext();
+      showPuzzle(idx);
     }
     if (state.phase === 'finished') {
       clearInterval(timerInterval);
+      AudioManager.stopAlarm();
+      state.win ? AudioManager.victory() : AudioManager.defeat();
       const overlay = document.getElementById('end-overlay');
       const card = document.getElementById('end-card');
       overlay.classList.add('visible');
@@ -195,15 +206,18 @@ function setupListeners() {
 
   GameDB.onResult(result => {
     if (result.valid) {
+      AudioManager.success();
       showNotif('✅ ' + result.message, 'success');
       log(result.message, 'ok');
     } else {
+      AudioManager.error();
       showNotif('❌ ' + result.message, 'error');
       log(result.message, 'error');
     }
   });
 
   GameDB.onDisconnect(() => {
+    AudioManager.disconnect();
     showNotif('⚠ L\'Opérateur s\'est déconnecté', 'error');
     log('Opérateur déconnecté !', 'error');
   });
