@@ -12,6 +12,11 @@ const wss = new WebSocket.Server({ server });
 // Servir les fichiers statiques du client
 app.use(express.static(path.join(__dirname, '..', 'client')));
 
+// Route Hub Spatial
+app.get('/hub', (req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'client', 'hub.html'));
+});
+
 // Rooms: roomCode -> { players: {technician, operator}, gameState, timer }
 const rooms = {};
 
