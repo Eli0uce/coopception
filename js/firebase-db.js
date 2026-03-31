@@ -1,6 +1,5 @@
 // Couche d'abstraction Firebase Realtime Database
 const GameDB = (() => {
-  const TIME_LIMIT = 900;
   let db = null;
   let roomCode = null;
   let myRole = null;
@@ -67,10 +66,12 @@ const GameDB = (() => {
 
   async function startGame() {
     const puzzles = buildRandomPuzzles();
+    const timeLimit = computeTimeLimit(puzzles);
     initPuzzles(JSON.stringify(puzzles));
     await db.ref(`rooms/${roomCode}/state`).update({
       phase: 'playing', currentPuzzle: 0, startTimestamp: Date.now(),
-      puzzlesSeed: JSON.stringify(puzzles)
+      puzzlesSeed: JSON.stringify(puzzles),
+      timeLimit
     });
   }
 
@@ -140,8 +141,7 @@ const GameDB = (() => {
   function getDb()        { return db; }
   function getRole()      { return myRole; }
   function getCode()      { return roomCode; }
-  function getTimeLimit() { return TIME_LIMIT; }
 
-  return { init, rejoinRoom, createRoom, joinRoom, startGame, submitResult, triggerTimeout, cleanupRoom, onRoomReady, onStateChange, onResult, onDisconnect, getDb, getRole, getCode, getTimeLimit };
+  return { init, rejoinRoom, createRoom, joinRoom, startGame, submitResult, triggerTimeout, cleanupRoom, onRoomReady, onStateChange, onResult, onDisconnect, getDb, getRole, getCode };
 })();
 

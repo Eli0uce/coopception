@@ -55,12 +55,16 @@ function buildDots(total, current) {
   }
 }
 
+let timeLimit = 900;
+
+// ...existing code...
+
 function startTimerLoop() {
   clearInterval(timerInterval);
   timerInterval = setInterval(() => {
     if (!startTimestamp) return;
     const elapsed = Math.floor((Date.now() - startTimestamp) / 1000);
-    const left = GameDB.getTimeLimit() - elapsed;
+    const left = timeLimit - elapsed;
     if (left <= 0) {
       clearInterval(timerInterval);
       setTimer(0);
@@ -85,9 +89,11 @@ function renderPuzzle(puzzle) {
   panel.appendChild(hdr);
   switch(puzzle.type) {
     case 'cross_code':      renderCrossCode(panel, puzzle.data);    break;
+    case 'symbol_code':     renderCrossCode(panel, puzzle.data);    break;
     case 'mirror_sequence': renderMirrorSeq(panel, puzzle.data);    break;
     case 'cipher':          renderCipher(panel, puzzle.data);       break;
     case 'calibration':     renderCalib(panel, puzzle.data);        break;
+    case 'wire_panel':      renderWirePanel(panel, puzzle.data);    break;
     case 'final_protocol':  renderFinal(panel, puzzle.data);        break;
   }
 }
@@ -165,6 +171,22 @@ function renderFinal(p, d) {
   p.appendChild(div);
 }
 
+function renderWirePanel(p, d) {
+  const wireColors = ['#ff5555','#5588ff','#55ff55','#ffcc00','#ff8800','#cc88ff'];
+  const div = document.createElement('div');
+  div.innerHTML = '<div style="font-size:12px;color:var(--green-dim);letter-spacing:2px;margin-bottom:14px;">DICTEZ CES CONNEXIONS :</div>';
+  const tbl = document.createElement('table');
+  tbl.className = 'mapping-table';
+  tbl.innerHTML = '<tr><th style="color:var(--amber)">FIL</th><th style="color:var(--green)">→ PORT</th></tr>';
+  d.connections.forEach((c, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td style="color:${wireColors[i%wireColors.length]};font-weight:bold;">${c.wire}</td><td style="color:var(--amber)">${c.port}</td>`;
+    tbl.appendChild(tr);
+  });
+  div.appendChild(tbl);
+  p.appendChild(div);
+}
+
 function showPuzzle(index) {
   if (index === lastPuzzleIndex) return;
   lastPuzzleIndex = index;
@@ -184,6 +206,7 @@ function setupListeners() {
       // ── Intro cinématique (une seule fois au lancement) ──
       if (!introShown && state.startTimestamp) {
         introShown = true;
+        if (state.timeLimit) timeLimit = state.timeLimit;
         document.getElementById('start-overlay').style.display = 'none';
         document.getElementById('game-area').style.display = 'grid';
         if (state.puzzlesSeed && PUZZLES.length === 0) initPuzzles(state.puzzlesSeed);

@@ -521,15 +521,10 @@
 
       <div class="setting-row">
         <div class="setting-label">
-          DURÉE DE LA PARTIE
-          <small>Temps limite pour compléter les modules</small>
+          DURÉE DE PARTIE
+          <small>Calculée automatiquement selon les puzzles tirés</small>
         </div>
-        <select class="setting-select" id="set-timer" onchange="saveSetting('timer', this.value)">
-          <option value="600">10 MIN</option>
-          <option value="900" selected>15 MIN</option>
-          <option value="1200">20 MIN</option>
-          <option value="0">SANS LIMITE</option>
-        </select>
+        <div style="font-size:11px;color:var(--green);letter-spacing:1px;border:1px solid var(--green-dim);padding:6px 10px;">AUTO ⚙</div>
       </div>
 
       <div class="setting-row">
@@ -667,15 +662,13 @@ function saveSetting(key, val) {
 function loadSettings() {
   const crt    = localStorage.getItem('sz_crt')    !== 'false';
   const glitch = localStorage.getItem('sz_glitch') !== 'false';
-  const sfx    = localStorage.getItem('sz_sfx')    !== 'false'; // activé par défaut
+  const sfx    = localStorage.getItem('sz_sfx')    !== 'false';
   const music  = localStorage.getItem('sz_music')  === 'true';
-  const timer  = localStorage.getItem('sz_timer')  || '900';
 
   document.getElementById('set-crt').checked    = crt;
   document.getElementById('set-glitch').checked = glitch;
   document.getElementById('set-sfx').checked    = sfx;
   document.getElementById('set-music').checked  = music;
-  document.getElementById('set-timer').value    = timer;
 
   toggleCRT(crt);
   toggleGlitch(glitch);

@@ -5,6 +5,7 @@ let startTimestamp = null;
 let lastPuzzleIndex = -1;
 let seqState = [];
 let finalState = { switch: null, code: '', levers: [], validate: false };
+let timeLimit = 900;
 
 GameDB.init();
 const roomCode = sessionStorage.getItem('sz_room');
@@ -59,7 +60,7 @@ function startTimerLoop() {
   timerInterval = setInterval(() => {
     if (!startTimestamp) return;
     const elapsed = Math.floor((Date.now() - startTimestamp) / 1000);
-    const left = GameDB.getTimeLimit() - elapsed;
+    const left = timeLimit - elapsed;
     if (left <= 0) {
       clearInterval(timerInterval);
       setTimer(0);
@@ -96,10 +97,12 @@ function showPuzzle(index) {
     <div style="font-size:12px;color:var(--amber-dim);letter-spacing:1px;margin-bottom:20px;">${puzzle.operatorData.subtitle}</div>`;
   area.appendChild(hdr);
   switch(puzzle.type) {
-    case 'cross_code':      renderCrossCodeOp(area, puzzle.operatorData); break;
+    case 'cross_code':
+    case 'symbol_code':     renderCrossCodeOp(area, puzzle.operatorData); break;
     case 'mirror_sequence': renderMirrorOp(area, puzzle.operatorData);    break;
     case 'cipher':          renderCipherOp(area, puzzle.operatorData);    break;
     case 'calibration':     renderCalibOp(area, puzzle.operatorData);     break;
+    case 'wire_panel':      renderWireOp(area, puzzle.operatorData);      break;
     case 'final_protocol':  renderFinalOp(area, puzzle.operatorData);     break;
   }
   statusLog(`Module actif : ${puzzle.module}`, 'var(--green)');
@@ -185,6 +188,46 @@ function renderCalibOp(area, d) {
   area.appendChild(btn);
 }
 
+function renderWireOp(area, d) {
+  const wireColors = ['#ff5555','#5588ff','#55ff55','#ffcc00','#ff8800','#cc88ff'];
+  const hdr = document.createElement('div');
+  hdr.style.cssText = 'font-size:11px;color:var(--amber-dim);letter-spacing:2px;margin-bottom:14px;';
+  hdr.textContent = 'CONNECTEZ CHAQUE FIL AU BON PORT :';
+  area.appendChild(hdr);
+
+  const selections = {};
+  d.wires.forEach((wire, i) => {
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:12px;margin-bottom:12px;';
+    const lbl = document.createElement('div');
+    lbl.style.cssText = `min-width:130px;font-size:13px;color:${wireColors[i%wireColors.length]};letter-spacing:1px;font-weight:bold;`;
+    lbl.textContent = wire;
+    const sel = document.createElement('select');
+    sel.style.cssText = 'flex:1;background:var(--panel);border:1px solid var(--border);color:var(--amber);font-family:\'Share Tech Mono\',monospace;font-size:12px;padding:6px;';
+    const def = document.createElement('option');
+    def.value = ''; def.textContent = '— SÉLECTIONNER —';
+    sel.appendChild(def);
+    d.ports.forEach(port => {
+      const opt = document.createElement('option');
+      opt.value = port; opt.textContent = port;
+      sel.appendChild(opt);
+    });
+    sel.onchange = () => { selections[wire] = sel.value; };
+    row.appendChild(lbl); row.appendChild(sel);
+    area.appendChild(row);
+  });
+
+  const btn = document.createElement('button');
+  btn.className = 'validate-btn'; btn.style.marginTop = '14px';
+  btn.textContent = '✔ VALIDER CÂBLAGE';
+  btn.onclick = () => {
+    const allSet = d.wires.every(w => selections[w]);
+    if (!allSet) { statusLog('Tous les fils doivent être connectés !', 'var(--red)'); return; }
+    submitAction({ connections: selections });
+  };
+  area.appendChild(btn);
+}
+
 function renderFinalOp(area, d) {
   const grid = document.createElement('div'); grid.style.cssText='display:flex;flex-direction:column;gap:14px;';
 
@@ -244,6 +287,7 @@ function setupListeners() {
     if (state.phase === 'playing') {
       if (!introShown && state.startTimestamp) {
         introShown = true;
+        if (state.timeLimit) timeLimit = state.timeLimit;
         document.getElementById('wait-overlay').style.display = 'none';
         document.getElementById('game-area').style.display = 'grid';
         if (state.puzzlesSeed && PUZZLES.length === 0) initPuzzles(state.puzzlesSeed);
