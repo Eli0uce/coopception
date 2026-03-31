@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>STATION ZÉRO — Lobby</title>
+  <link rel="stylesheet" href="css/main.css">
+  <style>
+    body { display:flex;align-items:center;justify-content:center;min-height:100vh; }
+    .lobby-wrap { width:480px;text-align:center; }
+    .logo { font-family:'VT323',monospace;font-size:80px;color:var(--green);text-shadow:var(--glow);line-height:1; }
+    .subtitle { color:var(--green-dim);letter-spacing:4px;font-size:13px;margin-bottom:40px; }
+    .tabs { display:flex; }
+    .tab { flex:1;padding:10px;cursor:pointer;border:1px solid var(--border);color:var(--green-dim);font-family:'Share Tech Mono',monospace;font-size:13px;letter-spacing:2px;background:transparent;transition:all .2s; }
+    .tab.active { border-color:var(--green);color:var(--green);background:var(--green-dark);box-shadow:var(--glow); }
+    .tab-content { display:none; }
+    .tab-content.active { display:block; }
+    .form-wrap { padding:30px;border:1px solid var(--border);border-top:none;background:var(--panel); }
+    .form-group { margin-bottom:20px;text-align:left; }
+    .form-group label { display:block;font-size:11px;letter-spacing:2px;color:var(--green-dim);margin-bottom:8px; }
+    .room-code-display { font-family:'VT323',monospace;font-size:64px;letter-spacing:12px;color:var(--green);text-shadow:var(--glow);text-align:center;padding:20px;border:1px solid var(--green);background:var(--green-dark);margin:20px 0; }
+    .waiting { color:var(--amber);font-size:13px;letter-spacing:2px; }
+    #input-code { text-align:center;font-size:28px;letter-spacing:8px;text-transform:uppercase; }
+    .hint { font-size:11px;color:var(--green-dim);margin-top:16px;line-height:1.6; }
+    .role-badge { display:inline-block;padding:4px 14px;border:1px solid;font-size:12px;letter-spacing:2px;margin:8px 0; }
+    .role-badge.tech { border-color:var(--green);color:var(--green); }
+    .role-badge.oper { border-color:var(--amber);color:var(--amber); }
+    #error-msg, #create-error { color:var(--red);font-size:13px;margin-top:10px;min-height:20px; }
+  </style>
+</head>
+<body>
+  <div class="scanline"></div>
+  <div class="lobby-wrap">
+    <div class="logo">STATION<br>ZÉRO</div>
+    <div class="subtitle">PROTOCOLE DE SURVIE COOPÉRATIF — 2 JOUEURS</div>
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('create')">CRÉER UNE ROOM</button>
+      <button class="tab" onclick="switchTab('join')">REJOINDRE</button>
+    </div>
+    <div id="tab-create" class="tab-content active">
+      <div class="form-wrap">
+        <div id="create-init">
+          <p class="hint">Vous serez le <strong>TECHNICIEN</strong>.<br>Partagez le code à votre coéquipier Opérateur.</p><br>
+          <button class="btn primary" onclick="createRoom()" style="width:100%">⚡ CRÉER LA ROOM</button>
+          <div id="create-error"></div>
+        </div>
+        <div id="create-waiting" style="display:none">
+          <p style="font-size:12px;letter-spacing:2px;color:var(--green-dim)">CODE DE LA ROOM</p>
+          <div class="room-code-display" id="room-code-text">----</div>
+          <div class="role-badge tech">RÔLE : TECHNICIEN</div><br>
+          <p class="waiting blink">⏳ En attente de l'Opérateur...</p>
+          <p class="hint">Donnez ce code à votre ami pour rejoindre la partie.</p>
+        </div>
+      </div>
+    </div>
+    <div id="tab-join" class="tab-content">
+      <div class="form-wrap">
+        <div class="form-group">
+          <label>CODE DE LA ROOM</label>
+          <input type="text" id="input-code" maxlength="4" placeholder="XXXX" autocomplete="off">
+        </div>
+        <div class="role-badge oper">RÔLE : OPÉRATEUR</div><br>
+        <button class="btn primary" onclick="joinRoom()" style="width:100%">🔗 REJOINDRE</button>
+        <div id="error-msg"></div>
+        <p class="hint">Entrez le code fourni par le Technicien.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+  <script src="js/firebase-config.js"></script>
+  <script src="js/firebase-db.js"></script>
+  <script src="js/puzzles.js"></script>
+  <script src="js/lobby.js"></script>
+</body>
+</html>
+

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <title>STATION ZÉRO — Opérateur</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/operator.css">
+  <style>
+    body { background:#080500; }
+    body::before { background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(255,176,0,0.03) 2px,rgba(255,176,0,0.03) 4px); }
+    .scanline { background:rgba(255,176,0,0.1); }
+  </style>
+</head>
+<body>
+<div class="scanline"></div>
+
+<div id="wait-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.95);display:flex;align-items:center;justify-content:center;z-index:8000;flex-direction:column;gap:16px;">
+  <div style="font-family:'VT323',monospace;font-size:60px;color:var(--amber);text-shadow:var(--glow-amber);">STATION ZÉRO</div>
+  <div style="font-size:14px;letter-spacing:3px;color:var(--amber-dim)">RÔLE : <span style="color:var(--amber)">OPÉRATEUR</span></div>
+  <div style="font-size:13px;color:var(--green);letter-spacing:2px;text-align:center;max-width:400px;line-height:1.8;">
+    Vous contrôlez les panneaux physiques.<br>Attendez les instructions du Technicien.
+  </div>
+  <div class="blink" style="color:var(--amber);letter-spacing:3px;font-size:14px;">⏳ EN ATTENTE DU LANCEMENT...</div>
+</div>
+
+<div id="end-overlay">
+  <div id="end-card">
+    <h1 id="end-title">VICTOIRE</h1>
+    <p id="end-reason"></p>
+    <button class="btn" onclick="location.href='/'">↩ RETOUR AU LOBBY</button>
+  </div>
+</div>
+
+<div class="oper-layout" id="game-area" style="display:none;">
+  <div class="oper-header">
+    <div class="role-label">⚙ OPÉRATEUR</div>
+    <div id="timer-display">15:00</div>
+    <div class="module-name" id="module-name">MODULE ???</div>
+  </div>
+  <div class="oper-main">
+    <div class="panel-block" id="control-panel" data-title="PANNEAU DE CONTRÔLE">
+      <div id="controls-area"></div>
+    </div>
+    <div class="panel-block" id="status-panel" data-title="ÉTAT DU SYSTÈME">
+      <div id="status-area" style="font-size:13px;color:var(--amber-dim);line-height:2;"></div>
+    </div>
+  </div>
+  <div class="oper-footer">
+    <div class="puzzle-progress" id="puzzle-dots"></div>
+    <div style="font-size:12px;color:var(--amber-dim);" id="footer-status">EN ATTENTE...</div>
+  </div>
+</div>
+
+<div id="chat-widget">
+  <div id="chat-body" style="display:flex;">
+    <div id="chat-messages"></div>
+    <div id="chat-input-row">
+      <input type="text" id="chat-input" placeholder="Message...">
+      <button id="chat-send">➤</button>
+    </div>
+  </div>
+  <button id="chat-toggle">💬 COMM — MASQUER</button>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/firebase-db.js"></script>
+<script src="js/puzzles.js"></script>
+<script src="js/chat.js"></script>
+<script src="js/operator.js"></script>
+</body>
+</html>
+

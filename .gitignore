@@ -1,0 +1,28 @@
+# Dépendances Node.js
+node_modules/
+server/node_modules/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Variables d'environnement
+.env
+.env.local
+
+# JetBrains IDE
+.idea/
+*.iml
+
+# Ancien code WebSocket (remplacé par Firebase)
+client/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build / dist
+dist/
+build/
+
+
