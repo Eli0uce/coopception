@@ -3,95 +3,691 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>STATION ZÉRO — Lobby</title>
+  <title>STATION ZÉRO</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚀</text></svg>">
   <link rel="stylesheet" href="css/main.css">
   <style>
+    /* ── Layout général ───────────────────────────────────── */
+    * { box-sizing: border-box; margin: 0; padding: 0; }
     body {
-      display:flex;align-items:center;justify-content:center;min-height:100vh;
-      background-color: #020408;
-      background-image:
-        radial-gradient(circle 1px at 10% 20%, rgba(255,255,255,0.6) 0%, transparent 100%),
-        radial-gradient(circle 1px at 25% 65%, rgba(255,255,255,0.5) 0%, transparent 100%),
-        radial-gradient(circle 1px at 40% 10%, rgba(255,255,255,0.7) 0%, transparent 100%),
-        radial-gradient(circle 1px at 55% 80%, rgba(255,255,255,0.4) 0%, transparent 100%),
-        radial-gradient(circle 1px at 70% 35%, rgba(255,255,255,0.6) 0%, transparent 100%),
-        radial-gradient(circle 1px at 80% 55%, rgba(255,255,255,0.5) 0%, transparent 100%),
-        radial-gradient(circle 1px at 90% 15%, rgba(255,255,255,0.7) 0%, transparent 100%),
-        radial-gradient(circle 1px at 15% 90%, rgba(255,255,255,0.4) 0%, transparent 100%),
-        radial-gradient(circle 1px at 60% 50%, rgba(255,255,255,0.3) 0%, transparent 100%),
-        radial-gradient(circle 1px at 35% 40%, rgba(255,255,255,0.5) 0%, transparent 100%),
-        radial-gradient(circle 1px at 85% 75%, rgba(255,255,255,0.6) 0%, transparent 100%),
-        radial-gradient(circle 2px at 50% 25%, rgba(0,255,65,0.2) 0%, transparent 100%),
-        radial-gradient(ellipse 60% 40% at 50% 50%, rgba(0,10,20,0.8) 0%, rgba(2,4,8,1) 100%);
+      background: #020408;
+      min-height: 100vh;
+      overflow: hidden;
+      font-family: 'Share Tech Mono', monospace;
     }
-    .lobby-wrap { width:480px;text-align:center; }
-    .logo { font-family:'VT323',monospace;font-size:80px;color:var(--green);text-shadow:var(--glow);line-height:1; }
-    .subtitle { color:var(--green-dim);letter-spacing:4px;font-size:13px;margin-bottom:40px; }
-    .tabs { display:flex; }
-    .tab { flex:1;padding:10px;cursor:pointer;border:1px solid var(--border);color:var(--green-dim);font-family:'Share Tech Mono',monospace;font-size:13px;letter-spacing:2px;background:transparent;transition:all .2s; }
-    .tab.active { border-color:var(--green);color:var(--green);background:var(--green-dark);box-shadow:var(--glow); }
-    .tab-content { display:none; }
-    .tab-content.active { display:block; }
-    .form-wrap { padding:30px;border:1px solid var(--border);border-top:none;background:var(--panel); }
-    .form-group { margin-bottom:20px;text-align:left; }
-    .form-group label { display:block;font-size:11px;letter-spacing:2px;color:var(--green-dim);margin-bottom:8px; }
-    .room-code-display { font-family:'VT323',monospace;font-size:64px;letter-spacing:12px;color:var(--green);text-shadow:var(--glow);text-align:center;padding:20px;border:1px solid var(--green);background:var(--green-dark);margin:20px 0; }
-    .waiting { color:var(--amber);font-size:13px;letter-spacing:2px; }
-    #input-code { text-align:center;font-size:28px;letter-spacing:8px;text-transform:uppercase; }
-    .hint { font-size:11px;color:var(--green-dim);margin-top:16px;line-height:1.6; }
-    .role-badge { display:inline-block;padding:4px 14px;border:1px solid;font-size:12px;letter-spacing:2px;margin:8px 0; }
-    .role-badge.tech { border-color:var(--green);color:var(--green); }
-    .role-badge.oper { border-color:var(--amber);color:var(--amber); }
-    #error-msg, #create-error { color:var(--red);font-size:13px;margin-top:10px;min-height:20px; }
+
+    /* ── Étoiles ──────────────────────────────────────────── */
+    #stars {
+      position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    }
+    .star {
+      position: absolute;
+      background: #fff;
+      border-radius: 50%;
+      animation: twinkle var(--d, 3s) ease-in-out infinite;
+    }
+    @keyframes twinkle {
+      0%,100% { opacity: var(--a, 0.6); transform: scale(1); }
+      50%      { opacity: 0.1;           transform: scale(0.5); }
+    }
+
+    /* ── Radar ────────────────────────────────────────────── */
+    #radar-wrap {
+      position: fixed;
+      right: -120px; bottom: -120px;
+      width: 500px; height: 500px;
+      z-index: 1; pointer-events: none;
+      opacity: 0.18;
+    }
+    .radar-circle {
+      position: absolute; inset: 0;
+      border-radius: 50%;
+      border: 1px solid var(--green);
+    }
+    .radar-c1 { width:25%;  height:25%;  top:37.5%; left:37.5%; }
+    .radar-c2 { width:50%;  height:50%;  top:25%;   left:25%;   }
+    .radar-c3 { width:75%;  height:75%;  top:12.5%; left:12.5%; }
+    .radar-c4 { width:100%; height:100%; top:0;      left:0;     }
+    .radar-line {
+      position: absolute; inset: 0;
+      border-radius: 50%;
+      background: conic-gradient(from 0deg,
+        rgba(0,255,65,0) 0deg,
+        rgba(0,255,65,0) 310deg,
+        rgba(0,255,65,0.6) 350deg,
+        rgba(0,255,65,0.9) 360deg);
+      animation: radar-spin 4s linear infinite;
+    }
+    .radar-crossh {
+      position: absolute;
+      background: var(--green);
+      opacity: 0.3;
+    }
+    .radar-crossh.h { width:100%; height:1px; top:50%; }
+    .radar-crossh.v { height:100%; width:1px; left:50%; }
+    .radar-blip {
+      position: absolute;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: 0 0 8px var(--green);
+      animation: blip-fade 4s ease-in-out infinite;
+    }
+    @keyframes radar-spin { from { transform: rotate(0); } to { transform: rotate(360deg); } }
+    @keyframes blip-fade {
+      0%,100% { opacity: 0; }
+      40%,60% { opacity: 1; }
+    }
+
+    /* ── Écrans ───────────────────────────────────────────── */
+    .screen {
+      position: fixed; inset: 0;
+      display: flex; align-items: center; justify-content: center;
+      z-index: 10;
+      transition: opacity 0.4s ease, transform 0.4s ease;
+    }
+    .screen.hidden {
+      opacity: 0; pointer-events: none; transform: translateY(20px);
+    }
+
+    /* ── MENU PRINCIPAL ───────────────────────────────────── */
+    #screen-main {
+      flex-direction: column;
+      gap: 0;
+    }
+    .main-inner {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 10px;
+      position: relative;
+      z-index: 2;
+    }
+
+    /* Badge "TOP SECRET" */
+    .badge {
+      border: 1px solid var(--amber);
+      color: var(--amber);
+      font-size: 11px;
+      letter-spacing: 5px;
+      padding: 4px 16px;
+      margin-bottom: 8px;
+      animation: pulse-badge 2s ease infinite;
+    }
+    @keyframes pulse-badge { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+    /* Titre avec effet glitch */
+    .main-title {
+      font-family: 'VT323', monospace;
+      font-size: clamp(60px, 10vw, 110px);
+      color: var(--green);
+      text-shadow: var(--glow);
+      letter-spacing: 8px;
+      line-height: 1;
+      position: relative;
+      animation: glitch-main 6s infinite;
+    }
+    .main-title::before,
+    .main-title::after {
+      content: attr(data-text);
+      position: absolute;
+      top: 0; left: 0;
+      width: 100%; height: 100%;
+    }
+    .main-title::before {
+      color: #ff003c;
+      text-shadow: none;
+      clip-path: polygon(0 30%, 100% 30%, 100% 50%, 0 50%);
+      animation: glitch-before 6s infinite;
+    }
+    .main-title::after {
+      color: #00fff9;
+      text-shadow: none;
+      clip-path: polygon(0 60%, 100% 60%, 100% 75%, 0 75%);
+      animation: glitch-after 6s infinite;
+    }
+    @keyframes glitch-main {
+      0%,95%,100% { transform: none; }
+      96% { transform: skew(-1deg); }
+      97% { transform: skew(1deg); }
+      98% { transform: none; }
+    }
+    @keyframes glitch-before {
+      0%,94%,100% { transform: none; opacity:0; }
+      95% { transform: translateX(-4px); opacity:0.7; }
+      96% { transform: translateX(4px);  opacity:0.7; }
+      97% { transform: none;             opacity:0; }
+    }
+    @keyframes glitch-after {
+      0%,94%,100% { transform: none; opacity:0; }
+      95% { transform: translateX(4px);  opacity:0.7; }
+      96% { transform: translateX(-4px); opacity:0.7; }
+      97% { transform: none;             opacity:0; }
+    }
+
+    .main-subtitle {
+      color: var(--green-dim);
+      font-size: 13px;
+      letter-spacing: 5px;
+      text-align: center;
+      margin-bottom: 8px;
+    }
+
+    /* Séparateur */
+    .sep {
+      width: 300px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--green), transparent);
+      margin: 16px 0;
+    }
+
+    /* Boutons du menu */
+    .menu-btn {
+      width: 280px;
+      padding: 14px 0;
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--green-dim);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 15px;
+      letter-spacing: 4px;
+      cursor: pointer;
+      text-align: left;
+      padding-left: 24px;
+      transition: all 0.2s;
+      position: relative;
+    }
+    .menu-btn::before {
+      content: '›';
+      position: absolute;
+      left: 8px;
+      opacity: 0;
+      transition: opacity 0.2s;
+    }
+    .menu-btn:hover, .menu-btn.active-btn {
+      border-color: var(--green);
+      color: var(--green);
+      background: rgba(0,255,65,0.05);
+      box-shadow: var(--glow);
+      padding-left: 30px;
+    }
+    .menu-btn:hover::before, .menu-btn.active-btn::before { opacity: 1; }
+    .menu-btn.primary-btn {
+      border-color: var(--green);
+      color: var(--green);
+      background: var(--green-dark);
+      box-shadow: var(--glow);
+    }
+    .menu-btn.primary-btn::before { opacity: 1; }
+
+    /* Version / statut */
+    .status-bar {
+      position: fixed;
+      bottom: 16px; left: 0; right: 0;
+      display: flex;
+      justify-content: space-between;
+      padding: 0 24px;
+      font-size: 11px;
+      color: var(--green-dim);
+      letter-spacing: 2px;
+      z-index: 20;
+    }
+    .status-bar .online { color: var(--green); }
+    .status-online-dot {
+      display: inline-block;
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--green);
+      box-shadow: var(--glow);
+      margin-right: 6px;
+      animation: blink 1s step-end infinite;
+    }
+
+    /* ── PANEL GÉNÉRIQUE (Jouer / Paramètres / Crédits) ───── */
+    .panel-wrap {
+      width: min(480px, 95vw);
+    }
+    .panel-header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 14px 20px;
+      border: 1px solid var(--green);
+      background: var(--green-dark);
+      margin-bottom: 0;
+    }
+    .panel-header h2 {
+      font-family: 'VT323', monospace;
+      font-size: 26px;
+      letter-spacing: 3px;
+      color: var(--green);
+    }
+    .panel-back {
+      background: transparent;
+      border: none;
+      color: var(--green-dim);
+      font-size: 20px;
+      cursor: pointer;
+      padding: 0 6px;
+      transition: color 0.2s;
+    }
+    .panel-back:hover { color: var(--green); }
+    .panel-body {
+      border: 1px solid var(--border);
+      border-top: none;
+      background: var(--panel);
+      padding: 28px;
+    }
+
+    /* ── LOBBY ────────────────────────────────────────────── */
+    .tabs { display: flex; }
+    .tab {
+      flex: 1; padding: 10px;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      color: var(--green-dim);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px; letter-spacing: 2px;
+      background: transparent; transition: all .2s;
+    }
+    .tab.active {
+      border-color: var(--green); color: var(--green);
+      background: var(--green-dark); box-shadow: var(--glow);
+    }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .form-group { margin-bottom: 18px; }
+    .form-group label {
+      display: block; font-size: 11px;
+      letter-spacing: 2px; color: var(--green-dim); margin-bottom: 8px;
+    }
+    .room-code-display {
+      font-family: 'VT323', monospace;
+      font-size: 60px; letter-spacing: 12px;
+      color: var(--green); text-shadow: var(--glow);
+      text-align: center; padding: 16px;
+      border: 1px solid var(--green);
+      background: var(--green-dark); margin: 14px 0;
+    }
+    .role-badge {
+      display: inline-block; padding: 4px 14px;
+      border: 1px solid; font-size: 11px; letter-spacing: 2px; margin: 6px 0;
+    }
+    .role-badge.tech { border-color: var(--green); color: var(--green); }
+    .role-badge.oper { border-color: var(--amber); color: var(--amber); }
+    #input-code {
+      text-align: center; font-size: 26px;
+      letter-spacing: 8px; text-transform: uppercase;
+    }
+    .hint { font-size: 11px; color: var(--green-dim); margin-top: 12px; line-height: 1.7; }
+    .waiting { color: var(--amber); font-size: 12px; letter-spacing: 2px; }
+    #error-msg, #create-error { color: var(--red); font-size: 12px; margin-top: 8px; min-height: 18px; }
+
+    /* ── PARAMÈTRES ───────────────────────────────────────── */
+    .setting-row {
+      display: flex; align-items: center;
+      justify-content: space-between;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .setting-row:last-child { border-bottom: none; }
+    .setting-label { font-size: 13px; color: var(--green-dim); letter-spacing: 1px; }
+    .setting-label small { display: block; font-size: 10px; color: #444; margin-top: 3px; }
+    /* Toggle switch */
+    .toggle {
+      position: relative; width: 44px; height: 24px; cursor: pointer;
+    }
+    .toggle input { opacity: 0; width: 0; height: 0; }
+    .toggle-slider {
+      position: absolute; inset: 0;
+      background: #222; border: 1px solid var(--border);
+      transition: .3s;
+    }
+    .toggle-slider::before {
+      content: ''; position: absolute;
+      height: 16px; width: 16px; left: 3px; bottom: 3px;
+      background: var(--green-dim); transition: .3s;
+    }
+    .toggle input:checked + .toggle-slider { background: var(--green-dark); border-color: var(--green); box-shadow: var(--glow); }
+    .toggle input:checked + .toggle-slider::before { transform: translateX(20px); background: var(--green); }
+
+    /* Select custom */
+    .setting-select {
+      background: transparent;
+      border: 1px solid var(--green-dim);
+      color: var(--green);
+      font-family: 'Share Tech Mono', monospace;
+      font-size: 12px; padding: 6px 10px;
+      cursor: pointer; outline: none;
+      letter-spacing: 1px;
+    }
+    .setting-select:focus { border-color: var(--green); box-shadow: var(--glow); }
+    option { background: #0a0a0a; }
+
+    /* ── CRÉDITS ──────────────────────────────────────────── */
+    .credits-block { margin-bottom: 20px; }
+    .credits-block h3 {
+      font-family: 'VT323', monospace; font-size: 20px;
+      color: var(--amber); letter-spacing: 2px;
+      border-bottom: 1px solid var(--border); padding-bottom: 6px; margin-bottom: 10px;
+    }
+    .credits-block p { font-size: 12px; color: var(--green-dim); line-height: 1.8; }
+    .credits-block a { color: var(--green); text-decoration: none; }
+    .credits-block a:hover { text-shadow: var(--glow); }
+    .puzzle-pill {
+      display: inline-block;
+      border: 1px solid var(--border);
+      color: var(--green-dim);
+      font-size: 10px; letter-spacing: 1px;
+      padding: 2px 8px; margin: 2px;
+    }
   </style>
 </head>
 <body>
-  <div class="scanline"></div>
-  <div class="lobby-wrap">
-    <div class="logo">STATION<br>ZÉRO</div>
-    <div class="subtitle">PROTOCOLE DE SURVIE COOPÉRATIF — 2 JOUEURS</div>
-    <div class="tabs">
-      <button class="tab active" onclick="switchTab('create')">CRÉER UNE ROOM</button>
-      <button class="tab" onclick="switchTab('join')">REJOINDRE</button>
+<div class="scanline"></div>
+
+<!-- Étoiles générées en JS -->
+<div id="stars"></div>
+
+<!-- Radar décoratif -->
+<div id="radar-wrap">
+  <div class="radar-line"></div>
+  <div class="radar-circle radar-c1"></div>
+  <div class="radar-circle radar-c2"></div>
+  <div class="radar-circle radar-c3"></div>
+  <div class="radar-circle radar-c4"></div>
+  <div class="radar-crossh h"></div>
+  <div class="radar-crossh v"></div>
+  <div class="radar-blip" style="top:32%;left:58%;animation-delay:1.2s"></div>
+  <div class="radar-blip" style="top:55%;left:40%;animation-delay:2.8s"></div>
+  <div class="radar-blip" style="top:20%;left:45%;animation-delay:0.5s"></div>
+  <div class="radar-blip" style="top:65%;left:60%;animation-delay:3.5s"></div>
+</div>
+
+<!-- ══ MENU PRINCIPAL ══════════════════════════════════ -->
+<div class="screen" id="screen-main">
+  <div class="main-inner">
+    <div class="badge">⬡ PROGRAMME SURVIE SPATIALE v2.1 ⬡</div>
+    <div class="main-title" data-text="STATION">STATION</div>
+    <div class="main-title" data-text="ZÉRO" style="margin-top:-20px">ZÉRO</div>
+    <div class="main-subtitle">PROTOCOLE COOPÉRATIF — 2 OPÉRATEURS REQUIS</div>
+    <div class="sep"></div>
+    <button class="menu-btn primary-btn" onclick="showScreen('play')">▶ &nbsp;LANCER LA MISSION</button>
+    <button class="menu-btn" onclick="showScreen('settings')">⚙ &nbsp;PARAMÈTRES</button>
+    <button class="menu-btn" onclick="showScreen('credits')">✦ &nbsp;BRIEFING &amp; CRÉDITS</button>
+  </div>
+</div>
+
+<!-- ══ JOUER ═══════════════════════════════════════════ -->
+<div class="screen hidden" id="screen-play">
+  <div class="panel-wrap">
+    <div class="panel-header">
+      <button class="panel-back" onclick="showScreen('main')">←</button>
+      <h2>SÉLECTION DU RÔLE</h2>
     </div>
-    <div id="tab-create" class="tab-content active">
-      <div class="form-wrap">
+    <div class="panel-body">
+      <div class="tabs">
+        <button class="tab active" onclick="switchTab('create')">CRÉER UNE ROOM</button>
+        <button class="tab" onclick="switchTab('join')">REJOINDRE</button>
+      </div>
+
+      <!-- CRÉER -->
+      <div id="tab-create" class="tab-content active" style="padding-top:20px;">
         <div id="create-init">
-          <p class="hint">Vous serez le <strong>TECHNICIEN</strong>.<br>Partagez le code à votre coéquipier Opérateur.</p><br>
+          <span class="role-badge tech">🖥 RÔLE : TECHNICIEN</span>
+          <p class="hint">Vous aurez accès aux manuels numériques.<br>Partagez le code généré à votre coéquipier Opérateur.</p>
+          <br>
           <button class="btn primary" onclick="createRoom()" style="width:100%">⚡ CRÉER LA ROOM</button>
           <div id="create-error"></div>
         </div>
-        <div id="create-waiting" style="display:none">
-          <p style="font-size:12px;letter-spacing:2px;color:var(--green-dim)">CODE DE LA ROOM</p>
+        <div id="create-waiting" style="display:none;text-align:center;">
+          <p style="font-size:11px;letter-spacing:2px;color:var(--green-dim)">CODE D'ACCÈS</p>
           <div class="room-code-display" id="room-code-text">----</div>
-          <div class="role-badge tech">RÔLE : TECHNICIEN</div><br>
+          <span class="role-badge tech">RÔLE : TECHNICIEN</span>
+          <br><br>
           <p class="waiting blink">⏳ En attente de l'Opérateur...</p>
-          <p class="hint">Donnez ce code à votre ami pour rejoindre la partie.</p>
+          <p class="hint" style="text-align:left;">Donnez ce code à votre coéquipier pour rejoindre la partie.</p>
         </div>
       </div>
-    </div>
-    <div id="tab-join" class="tab-content">
-      <div class="form-wrap">
+
+      <!-- REJOINDRE -->
+      <div id="tab-join" class="tab-content" style="padding-top:20px;">
+        <span class="role-badge oper">⚙ RÔLE : OPÉRATEUR</span>
+        <br><br>
         <div class="form-group">
           <label>CODE DE LA ROOM</label>
           <input type="text" id="input-code" maxlength="4" placeholder="XXXX" autocomplete="off">
         </div>
-        <div class="role-badge oper">RÔLE : OPÉRATEUR</div><br>
-        <button class="btn primary" onclick="joinRoom()" style="width:100%">🔗 REJOINDRE</button>
+        <button class="btn primary" onclick="joinRoom()" style="width:100%">🔗 REJOINDRE LA MISSION</button>
         <div id="error-msg"></div>
-        <p class="hint">Entrez le code fourni par le Technicien.</p>
+        <p class="hint">Entrez le code à 4 lettres fourni par le Technicien.</p>
       </div>
     </div>
   </div>
+</div>
 
-  <!-- Firebase SDK -->
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-  <script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-  <script src="js/firebase-config.js"></script>
-  <script src="js/puzzles.js"></script>
-  <script src="js/firebase-db.js"></script>
-  <script src="js/lobby.js"></script>
+<!-- ══ PARAMÈTRES ══════════════════════════════════════ -->
+<div class="screen hidden" id="screen-settings">
+  <div class="panel-wrap">
+    <div class="panel-header">
+      <button class="panel-back" onclick="showScreen('main')">←</button>
+      <h2>PARAMÈTRES</h2>
+    </div>
+    <div class="panel-body">
+
+      <div class="setting-row">
+        <div class="setting-label">
+          EFFETS SONORES
+          <small>Bips & alertes système</small>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="set-sfx" onchange="saveSetting('sfx', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          MUSIQUE D'AMBIANCE
+          <small>Drone spatial en fond</small>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="set-music" onchange="saveSetting('music', this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          EFFET CRT SCANLINES
+          <small>Lignes de balayage rétro</small>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="set-crt" checked onchange="saveSetting('crt', this.checked); toggleCRT(this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          EFFET GLITCH DU TITRE
+          <small>Animation glitch sur le titre</small>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="set-glitch" checked onchange="saveSetting('glitch', this.checked); toggleGlitch(this.checked)">
+          <span class="toggle-slider"></span>
+        </label>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          DURÉE DE LA PARTIE
+          <small>Temps limite pour compléter les modules</small>
+        </div>
+        <select class="setting-select" id="set-timer" onchange="saveSetting('timer', this.value)">
+          <option value="600">10 MIN</option>
+          <option value="900" selected>15 MIN</option>
+          <option value="1200">20 MIN</option>
+          <option value="0">SANS LIMITE</option>
+        </select>
+      </div>
+
+      <div class="setting-row">
+        <div class="setting-label">
+          PLEIN ÉCRAN
+          <small>Immersion maximale</small>
+        </div>
+        <button class="btn" style="font-size:12px;padding:8px 16px;" onclick="toggleFullscreen()">⛶ ACTIVER</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- ══ CRÉDITS ═════════════════════════════════════════ -->
+<div class="screen hidden" id="screen-credits">
+  <div class="panel-wrap" style="max-height:85vh;overflow-y:auto;">
+    <div class="panel-header">
+      <button class="panel-back" onclick="showScreen('main')">←</button>
+      <h2>BRIEFING DE MISSION</h2>
+    </div>
+    <div class="panel-body">
+
+      <div class="credits-block">
+        <h3>⬡ SYNOPSIS</h3>
+        <p>Station Zéro est en perdition. Les systèmes de survie tombent en panne en cascade. Il vous reste <strong style="color:var(--green)">15 minutes</strong> avant la dépressurisation totale.<br><br>
+        Deux équipes, deux points de vue. Le <strong style="color:var(--green)">Technicien</strong> lit les manuels numériques — l'<strong style="color:var(--amber)">Opérateur</strong> manipule les panneaux physiques. Aucun d'eux ne peut réussir seul.</p>
+      </div>
+
+      <div class="credits-block">
+        <h3>🧩 MODULES À RÉACTIVER</h3>
+        <span class="puzzle-pill">CODE CROISÉ</span>
+        <span class="puzzle-pill">SÉQUENCE MIROIR</span>
+        <span class="puzzle-pill">DÉCHIFFRAGE</span>
+        <span class="puzzle-pill">CALIBRAGE</span>
+        <span class="puzzle-pill">PROTOCOLE FINAL</span>
+        <p style="margin-top:10px;">Les variantes sont <strong style="color:var(--green)">randomisées</strong> à chaque partie — impossible de mémoriser les solutions.</p>
+      </div>
+
+      <div class="credits-block">
+        <h3>🎙 COMMUNICATION</h3>
+        <p>Utilisez le <strong style="color:var(--green)">chat vocal intégré</strong> (WebRTC P2P). Votre micro est activé automatiquement à l'entrée en jeu.<br>Bouton 🎙/🔇 pour couper le micro.</p>
+      </div>
+
+      <div class="credits-block">
+        <h3>✦ INSPIRATIONS</h3>
+        <p>
+          <a href="https://store.steampowered.com/app/1349480/Operation_Tango/" target="_blank">Operation: Tango</a> — Clever Plays<br>
+          <a href="https://store.steampowered.com/app/741390/We_Were_Here/" target="_blank">We Were Here</a> — Total Mayhem Games
+        </p>
+      </div>
+
+      <div class="credits-block">
+        <h3>⚙ TECHNIQUE</h3>
+        <p>HTML · CSS · JavaScript vanilla<br>Firebase Realtime Database · WebRTC<br>Hébergé sur GitHub Pages</p>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<!-- Barre de statut -->
+<div class="status-bar">
+  <span><span class="status-online-dot"></span><span class="online">SYSTÈME EN LIGNE</span></span>
+  <span id="status-time">--:--:--</span>
+  <span>STATION ZÉRO v2.1</span>
+</div>
+
+<!-- Firebase SDK -->
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/puzzles.js"></script>
+<script src="js/firebase-db.js"></script>
+<script src="js/lobby.js"></script>
+
+<script>
+// ── Navigation ───────────────────────────────────────────────
+function showScreen(name) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.add('hidden'));
+  document.getElementById('screen-' + name).classList.remove('hidden');
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach((t, i) =>
+    t.classList.toggle('active', (name==='create'&&i===0)||(name==='join'&&i===1)));
+  document.getElementById('tab-create').classList.toggle('active', name==='create');
+  document.getElementById('tab-join').classList.toggle('active', name==='join');
+}
+
+// ── Étoiles ──────────────────────────────────────────────────
+(function generateStars() {
+  const container = document.getElementById('stars');
+  for (let i = 0; i < 120; i++) {
+    const s = document.createElement('div');
+    s.className = 'star';
+    const size = Math.random() * 2 + 0.5;
+    s.style.cssText = `
+      width:${size}px; height:${size}px;
+      top:${Math.random()*100}%;
+      left:${Math.random()*100}%;
+      --a:${(Math.random()*0.5+0.2).toFixed(2)};
+      --d:${(Math.random()*4+2).toFixed(1)}s;
+      animation-delay:${(Math.random()*5).toFixed(1)}s;
+    `;
+    container.appendChild(s);
+  }
+})();
+
+// ── Horloge ──────────────────────────────────────────────────
+function updateClock() {
+  const now = new Date();
+  document.getElementById('status-time').textContent =
+    now.toTimeString().slice(0,8);
+}
+setInterval(updateClock, 1000); updateClock();
+
+// ── Paramètres ───────────────────────────────────────────────
+function saveSetting(key, val) {
+  localStorage.setItem('sz_' + key, String(val));
+}
+function loadSettings() {
+  const crt    = localStorage.getItem('sz_crt')    !== 'false';
+  const glitch = localStorage.getItem('sz_glitch') !== 'false';
+  const sfx    = localStorage.getItem('sz_sfx')    === 'true';
+  const music  = localStorage.getItem('sz_music')  === 'true';
+  const timer  = localStorage.getItem('sz_timer')  || '900';
+
+  document.getElementById('set-crt').checked    = crt;
+  document.getElementById('set-glitch').checked = glitch;
+  document.getElementById('set-sfx').checked    = sfx;
+  document.getElementById('set-music').checked  = music;
+  document.getElementById('set-timer').value    = timer;
+
+  toggleCRT(crt);
+  toggleGlitch(glitch);
+}
+function toggleCRT(on) {
+  document.querySelector('.scanline').style.display = on ? 'block' : 'none';
+}
+function toggleGlitch(on) {
+  document.querySelectorAll('.main-title').forEach(t => {
+    t.style.animation = on ? '' : 'none';
+  });
+}
+function toggleFullscreen() {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen();
+  else document.exitFullscreen();
+}
+
+loadSettings();
+
+// ── Entrée sur la touche ENTER pour rejoindre ─────────────────
+document.getElementById('input-code').addEventListener('keydown', e => {
+  if (e.key === 'Enter') joinRoom();
+  setTimeout(() => { e.target.value = e.target.value.toUpperCase(); }, 0);
+});
+</script>
 </body>
 </html>
 
