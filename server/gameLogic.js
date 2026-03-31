@@ -3,6 +3,7 @@ const puzzles = require('./puzzles.json');
 function createGameState(roomId) {
   return {
     roomId,
+    phase: 'lobby',
     currentPuzzle: 0,
     totalPuzzles: puzzles.length,
     puzzleStates: puzzles.map(p => ({ id: p.id, solved: false, attempts: 0, progress: {} })),

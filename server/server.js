@@ -95,6 +95,7 @@ wss.on('connection', (ws) => {
         if (!room || !room.players.technician || !room.players.operator) return;
         if (ws.role !== 'technician') return;
         room.gameState.started = true;
+        room.gameState.phase = 'en_mission';
         const puzzleIndex = room.gameState.currentPuzzle;
         sendTo(room.players.technician, {
           type: 'game:started',
@@ -132,7 +133,11 @@ wss.on('connection', (ws) => {
               clearInterval(room.timer);
               room.gameState.finished = true;
               room.gameState.win = true;
-              broadcast(room, { type: 'game:over', win: true, reason: 'STATION RÉACTIVÉE' });
+              room.gameState.phase = 'hub';
+              broadcast(room, {
+                type: 'mission:complete',
+                timeLeft: room.gameState.timeLeft
+              });
             } else {
               room.gameState.currentPuzzle = next;
               const puzzles = require('./puzzles.json');
