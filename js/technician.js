@@ -177,30 +177,47 @@ function showPuzzle(index) {
 }
 
 function setupListeners() {
+  let introShown = false;
+
   GameDB.onStateChange(state => {
     if (state.phase === 'playing') {
-      document.getElementById('start-overlay').style.display = 'none';
-      document.getElementById('game-area').style.display = 'grid';
-      if (state.puzzlesSeed && PUZZLES.length === 0) initPuzzles(state.puzzlesSeed);
-      if (!startTimestamp && state.startTimestamp) {
+      // ── Intro cinématique (une seule fois au lancement) ──
+      if (!introShown && state.startTimestamp) {
+        introShown = true;
+        document.getElementById('start-overlay').style.display = 'none';
+        document.getElementById('game-area').style.display = 'grid';
+        if (state.puzzlesSeed && PUZZLES.length === 0) initPuzzles(state.puzzlesSeed);
         startTimestamp = state.startTimestamp;
         startTimerLoop();
         AudioManager.gameStart();
+        Scenario.play('intro', () => { showPuzzle(0); });
+        return;
       }
-      const idx = state.currentPuzzle || 0;
-      if (idx > 0 && idx !== lastPuzzleIndex) AudioManager.puzzleNext();
-      showPuzzle(idx);
+
+      // ── Passage au puzzle suivant avec cinématique ──
+      const newIdx = state.currentPuzzle || 0;
+      if (newIdx !== lastPuzzleIndex && lastPuzzleIndex >= 0 && newIdx > 0) {
+        const cutId = 'cutscene_' + lastPuzzleIndex;
+        AudioManager.puzzleNext();
+        Scenario.play(cutId, () => { showPuzzle(newIdx); });
+        return;
+      }
+      if (newIdx !== lastPuzzleIndex) showPuzzle(newIdx);
     }
+
     if (state.phase === 'finished') {
       clearInterval(timerInterval);
       AudioManager.stopAlarm();
+      const outroId = state.win ? 'outro_win' : 'outro_lose';
       state.win ? AudioManager.victory() : AudioManager.defeat();
-      const overlay = document.getElementById('end-overlay');
-      const card = document.getElementById('end-card');
-      overlay.classList.add('visible');
-      card.className = state.win ? 'win' : 'lose';
-      document.getElementById('end-title').textContent = state.win ? '🏆 VICTOIRE' : '💀 DÉFAITE';
-      document.getElementById('end-reason').textContent = state.reason;
+      Scenario.play(outroId, () => {
+        const overlay = document.getElementById('end-overlay');
+        const card = document.getElementById('end-card');
+        overlay.classList.add('visible');
+        card.className = state.win ? 'win' : 'lose';
+        document.getElementById('end-title').textContent = state.win ? '🏆 VICTOIRE' : '💀 DÉFAITE';
+        document.getElementById('end-reason').textContent = state.reason;
+      });
     }
   });
 

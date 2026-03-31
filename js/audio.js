@@ -113,8 +113,11 @@ const AudioManager = (() => {
     osc(330, 'square', t,       0.08, 0.2);
     osc(494, 'square', t + 0.09, 0.1, 0.2);
   }
-  function boot() {
+  function typeBeep() {
     if (!ctx || !sfxEnabled) return;
+    osc(1600 + Math.random()*400, 'sine', ctx.currentTime, 0.025, 0.04);
+  }
+  function boot() {
     const t = ctx.currentTime;
     // Bruit blanc court (boot HDD)
     const buf = ctx.createBuffer(1, ctx.sampleRate * 0.15, ctx.sampleRate);
@@ -232,7 +235,7 @@ const AudioManager = (() => {
     if (!ctx) return;
     const map = { hover, click, beep, connect, gameStart, success, error,
                   countdown, countdownUrgent, victory, defeat, disconnect,
-                  puzzleNext, boot, startAlarm, stopAlarm };
+                  puzzleNext, boot, typeBeep, startAlarm, stopAlarm };
     if (map[name]) map[name]();
   }
 
