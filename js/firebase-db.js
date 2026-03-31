@@ -14,13 +14,25 @@ const GameDB = (() => {
       </div>`;
       throw new Error('Firebase non configuré');
     }
-    firebase.initializeApp(FIREBASE_CONFIG);
+    // Évite l'erreur "app already exists" si Firebase est déjà initialisé
+    if (!firebase.apps.length) {
+      firebase.initializeApp(FIREBASE_CONFIG);
+    }
     db = firebase.database();
   }
 
   function genCode() {
     const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
     return Array.from({length:4}, () => chars[Math.floor(Math.random()*chars.length)]).join('');
+  }
+
+  // ── Appelé sur technician.html / operator.html pour rétablir la présence ──
+  async function rejoinRoom(code, role) {
+    roomCode = code;
+    myRole = role;
+    // Rétablir la présence après la navigation de page
+    await db.ref(`rooms/${code}/meta/${role}`).set(true);
+    db.ref(`rooms/${code}/meta/${role}`).onDisconnect().set(false);
   }
 
   async function createRoom() {
@@ -62,7 +74,6 @@ const GameDB = (() => {
     });
   }
 
-  // Appelé par l'opérateur uniquement après validation locale
   async function submitResult(puzzleIndex, valid, message) {
     await db.ref(`rooms/${roomCode}/lastResult`).set({ puzzleIndex, valid, message, ts: Date.now() });
     if (valid) {
@@ -82,6 +93,14 @@ const GameDB = (() => {
     }
   }
 
+  // Nettoyer la room Firebase quand on retourne au lobby
+  async function cleanupRoom() {
+    if (roomCode) {
+      await db.ref(`rooms/${roomCode}`).remove().catch(() => {});
+    }
+    sessionStorage.removeItem('sz_room');
+    sessionStorage.removeItem('sz_role');
+  }
 
   function onRoomReady(cb) {
     db.ref(`rooms/${roomCode}/meta/ready`).on('value', s => { if (s.val() === true) cb(); });
@@ -95,22 +114,34 @@ const GameDB = (() => {
     db.ref(`rooms/${roomCode}/lastResult`).on('value', s => { if (s.exists()) cb(s.val()); });
   }
 
-  function onChat(cb) {
-    db.ref(`rooms/${roomCode}/chat`).on('child_added', s => { if (s.exists()) cb(s.val()); });
-  }
-
+  // Délai de grâce de 4s pour éviter les faux positifs lors de la navigation
   function onDisconnect(cb) {
+    let disconnectTimer = null;
     db.ref(`rooms/${roomCode}/meta`).on('value', s => {
       const m = s.val();
-      if (m && (m.technician === false || m.operator === false) && m.ready === true) cb();
+      const someoneLeft = m && (m.technician === false || m.operator === false) && m.ready === true;
+      if (someoneLeft) {
+        // Attendre avant de déclencher — la navigation peut provoquer un faux positif bref
+        if (!disconnectTimer) {
+          disconnectTimer = setTimeout(async () => {
+            // Vérifier que le jeu est réellement en cours avant de déclencher
+            const phaseSnap = await db.ref(`rooms/${roomCode}/state/phase`).once('value');
+            if (phaseSnap.val() === 'playing') cb();
+            disconnectTimer = null;
+          }, 4000);
+        }
+      } else {
+        // Quelqu'un est revenu — annuler le timer
+        if (disconnectTimer) { clearTimeout(disconnectTimer); disconnectTimer = null; }
+      }
     });
   }
 
-  function getDb()       { return db; }
-  function getRole()     { return myRole; }
-  function getCode()     { return roomCode; }
-  function getTimeLimit(){ return TIME_LIMIT; }
+  function getDb()        { return db; }
+  function getRole()      { return myRole; }
+  function getCode()      { return roomCode; }
+  function getTimeLimit() { return TIME_LIMIT; }
 
-  return { init, createRoom, joinRoom, startGame, submitResult, triggerTimeout, onRoomReady, onStateChange, onResult, onDisconnect, getDb, getRole, getCode, getTimeLimit };
+  return { init, rejoinRoom, createRoom, joinRoom, startGame, submitResult, triggerTimeout, cleanupRoom, onRoomReady, onStateChange, onResult, onDisconnect, getDb, getRole, getCode, getTimeLimit };
 })();
 

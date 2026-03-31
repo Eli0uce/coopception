@@ -7,9 +7,13 @@ let lastPuzzleIndex = -1;
 GameDB.init();
 
 const roomCode = sessionStorage.getItem('sz_room');
-if (!roomCode) { location.href = '/'; }
+if (!roomCode) { location.href = 'index.html'; }
 
-VoiceChat.init('technician', roomCode, GameDB.getDb());
+// Rétablir la présence Firebase et attendre avant de setup les listeners
+GameDB.rejoinRoom(roomCode, 'technician').then(() => {
+  VoiceChat.init('technician', roomCode, GameDB.getDb());
+  setupListeners();
+});
 
 // ── UI Helpers ──
 function log(text, type='info') {
@@ -166,45 +170,45 @@ function showPuzzle(index) {
   log(`Module actif : ${puzzle.module}`, 'ok');
 }
 
-// ── Firebase listeners ──
-GameDB.onStateChange(state => {
-  if (state.phase === 'playing') {
-    document.getElementById('start-overlay').style.display = 'none';
-    document.getElementById('game-area').style.display = 'grid';
-    if (state.puzzlesSeed && PUZZLES.length === 0) initPuzzles(state.puzzlesSeed);
-    if (!startTimestamp && state.startTimestamp) {
-      startTimestamp = state.startTimestamp;
-      startTimerLoop();
+function setupListeners() {
+  GameDB.onStateChange(state => {
+    if (state.phase === 'playing') {
+      document.getElementById('start-overlay').style.display = 'none';
+      document.getElementById('game-area').style.display = 'grid';
+      if (state.puzzlesSeed && PUZZLES.length === 0) initPuzzles(state.puzzlesSeed);
+      if (!startTimestamp && state.startTimestamp) {
+        startTimestamp = state.startTimestamp;
+        startTimerLoop();
+      }
+      showPuzzle(state.currentPuzzle || 0);
     }
-    showPuzzle(state.currentPuzzle || 0);
-  }
-  if (state.phase === 'finished') {
-    clearInterval(timerInterval);
-    const overlay = document.getElementById('end-overlay');
-    const card = document.getElementById('end-card');
-    overlay.classList.add('visible');
-    card.className = state.win ? 'win' : 'lose';
-    document.getElementById('end-title').textContent = state.win ? '🏆 VICTOIRE' : '💀 DÉFAITE';
-    document.getElementById('end-reason').textContent = state.reason;
-  }
-});
+    if (state.phase === 'finished') {
+      clearInterval(timerInterval);
+      const overlay = document.getElementById('end-overlay');
+      const card = document.getElementById('end-card');
+      overlay.classList.add('visible');
+      card.className = state.win ? 'win' : 'lose';
+      document.getElementById('end-title').textContent = state.win ? '🏆 VICTOIRE' : '💀 DÉFAITE';
+      document.getElementById('end-reason').textContent = state.reason;
+    }
+  });
 
-GameDB.onResult(result => {
-  if (result.valid) {
-    showNotif('✅ ' + result.message, 'success');
-    log(result.message, 'ok');
-  } else {
-    showNotif('❌ ' + result.message, 'error');
-    log(result.message, 'error');
-  }
-});
+  GameDB.onResult(result => {
+    if (result.valid) {
+      showNotif('✅ ' + result.message, 'success');
+      log(result.message, 'ok');
+    } else {
+      showNotif('❌ ' + result.message, 'error');
+      log(result.message, 'error');
+    }
+  });
 
-GameDB.onDisconnect(() => {
-  showNotif('⚠ L\'Opérateur s\'est déconnecté', 'error');
-  log('Opérateur déconnecté !', 'error');
-});
+  GameDB.onDisconnect(() => {
+    showNotif('⚠ L\'Opérateur s\'est déconnecté', 'error');
+    log('Opérateur déconnecté !', 'error');
+  });
+}
 
 document.getElementById('btn-start').addEventListener('click', () => {
   GameDB.startGame();
 });
-

@@ -27,7 +27,7 @@
   <div id="end-card">
     <h1 id="end-title">VICTOIRE</h1>
     <p id="end-reason"></p>
-    <button class="btn" onclick="location.href='/'">↩ RETOUR AU LOBBY</button>
+    <button class="btn" onclick="GameDB.cleanupRoom().then(()=>location.href='index.html')">↩ RETOUR AU LOBBY</button>
   </div>
 </div>
 
