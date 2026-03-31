@@ -4,13 +4,14 @@
 // Règles de sécurité recommandées (Realtime Database > Règles) :
 // { "rules": { ".read": true, ".write": true } }
 
-const FIREBASE_CONFIG = {
-  apiKey:            "VOTRE_API_KEY",
-  authDomain:        "VOTRE_PROJECT.firebaseapp.com",
-  databaseURL:       "https://VOTRE_PROJECT-default-rtdb.firebaseio.com",
-  projectId:         "VOTRE_PROJECT",
-  storageBucket:     "VOTRE_PROJECT.appspot.com",
-  messagingSenderId: "VOTRE_SENDER_ID",
-  appId:             "VOTRE_APP_ID"
+const firebaseConfig = {
+    apiKey: "AIzaSyDJhclEoSAsccSq_dJMpJXdJFoVgLXt9t8",
+    authDomain: "coopception.firebaseapp.com",
+    databaseURL: "https://coopception-default-rtdb.asia-southeast1.firebasedatabase.app",
+    projectId: "coopception",
+    storageBucket: "coopception.firebasestorage.app",
+    messagingSenderId: "923829728203",
+    appId: "1:923829728203:web:cadb8e27aa184421c87c4e",
+    measurementId: "G-8VYVJM6Q7B"
 };
 
