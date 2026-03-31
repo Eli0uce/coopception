@@ -9,7 +9,7 @@ let finalState = { switch: null, code: '', levers: [], validate: false };
 GameDB.init();
 const roomCode = sessionStorage.getItem('sz_room');
 if (!roomCode) { location.href = '/'; }
-Chat.init(role);
+VoiceChat.init('operator', roomCode, GameDB.getDb());
 
 // ── UI Helpers ──
 function statusLog(text, color='var(--amber-dim)') {

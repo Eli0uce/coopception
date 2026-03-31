@@ -9,7 +9,7 @@ GameDB.init();
 const roomCode = sessionStorage.getItem('sz_room');
 if (!roomCode) { location.href = '/'; }
 
-Chat.init(role);
+VoiceChat.init('technician', roomCode, GameDB.getDb());
 
 // ── UI Helpers ──
 function log(text, type='info') {

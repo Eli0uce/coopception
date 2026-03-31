@@ -79,9 +79,6 @@ const GameDB = (() => {
     }
   }
 
-  async function sendChat(text) {
-    await db.ref(`rooms/${roomCode}/chat`).push({ from: myRole, text, ts: Date.now() });
-  }
 
   function onRoomReady(cb) {
     db.ref(`rooms/${roomCode}/meta/ready`).on('value', s => { if (s.val() === true) cb(); });
@@ -106,10 +103,11 @@ const GameDB = (() => {
     });
   }
 
-  function getRole() { return myRole; }
-  function getCode() { return roomCode; }
-  function getTimeLimit() { return TIME_LIMIT; }
+  function getDb()       { return db; }
+  function getRole()     { return myRole; }
+  function getCode()     { return roomCode; }
+  function getTimeLimit(){ return TIME_LIMIT; }
 
-  return { init, createRoom, joinRoom, startGame, submitResult, triggerTimeout, sendChat, onRoomReady, onStateChange, onResult, onChat, onDisconnect, getRole, getCode, getTimeLimit };
+  return { init, createRoom, joinRoom, startGame, submitResult, triggerTimeout, onRoomReady, onStateChange, onResult, onDisconnect, getDb, getRole, getCode, getTimeLimit };
 })();
 
