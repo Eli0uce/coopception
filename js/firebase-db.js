@@ -31,7 +31,7 @@ const GameDB = (() => {
     myRole = role;
     // Rétablir la présence après la navigation de page
     await db.ref(`rooms/${code}/meta/${role}`).set(true);
-    db.ref(`rooms/${code}/meta/${role}`).onDisconnect().set(false);
+    await db.ref(`rooms/${code}/meta/${role}`).onDisconnect().set(false);
   }
 
   async function createRoom() {
@@ -46,7 +46,7 @@ const GameDB = (() => {
       meta: { technician: true, operator: false, ready: false, created: Date.now() },
       state: { phase: 'waiting', currentPuzzle: 0, startTimestamp: null, win: false, reason: '' }
     });
-    db.ref(`rooms/${code}/meta/technician`).onDisconnect().set(false);
+    await db.ref(`rooms/${code}/meta/technician`).onDisconnect().set(false);
     roomCode = code; myRole = 'technician';
     return code;
   }
@@ -59,7 +59,7 @@ const GameDB = (() => {
     if (!meta.technician) throw new Error('Le Technicien n\'est pas connecté');
     if (meta.operator)    throw new Error('Room déjà complète');
     await db.ref(`rooms/${code}/meta`).update({ operator: true, ready: true });
-    db.ref(`rooms/${code}/meta/operator`).onDisconnect().set(false);
+    await db.ref(`rooms/${code}/meta/operator`).onDisconnect().set(false);
     roomCode = code; myRole = 'operator';
     return 'operator';
   }
@@ -115,6 +115,22 @@ const GameDB = (() => {
     db.ref(`rooms/${roomCode}/lastResult`).on('value', s => { if (s.exists()) cb(s.val()); });
   }
 
+  // ── Sync cinématiques ───────────────────────────────────────────────────────
+  function setCinematicLine(sceneId, lineIdx) {
+    db.ref(`rooms/${roomCode}/cin`).set({ sceneId, lineIdx });
+  }
+
+  // Retourne une fonction pour stopper l'écoute
+  function onCinematicLine(sceneId, cb) {
+    const ref = db.ref(`rooms/${roomCode}/cin`);
+    const handler = snap => {
+      const v = snap.val();
+      if (v && v.sceneId === sceneId) cb(v.lineIdx);
+    };
+    ref.on('value', handler);
+    return () => ref.off('value', handler);
+  }
+
   // Délai de grâce de 4s pour éviter les faux positifs lors de la navigation
   function onDisconnect(cb) {
     let disconnectTimer = null;
@@ -142,6 +158,6 @@ const GameDB = (() => {
   function getRole()      { return myRole; }
   function getCode()      { return roomCode; }
 
-  return { init, rejoinRoom, createRoom, joinRoom, startGame, submitResult, triggerTimeout, cleanupRoom, onRoomReady, onStateChange, onResult, onDisconnect, getDb, getRole, getCode };
+  return { init, rejoinRoom, createRoom, joinRoom, startGame, submitResult, triggerTimeout, cleanupRoom, onRoomReady, onStateChange, onResult, onCinematicLine, setCinematicLine, onDisconnect, getDb, getRole, getCode };
 })();
 

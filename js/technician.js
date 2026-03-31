@@ -13,6 +13,11 @@ if (!roomCode) { location.href = 'index.html'; }
 GameDB.rejoinRoom(roomCode, 'technician').then(() => {
   AudioManager.init();
   AudioManager.boot();
+  // Technicien = contrôleur des cinématiques
+  Scenario.initSync(
+    (sceneId, lineIdx) => GameDB.setCinematicLine(sceneId, lineIdx),
+    (sceneId, cb)      => GameDB.onCinematicLine(sceneId, cb)
+  );
   VoiceChat.init('technician', roomCode, GameDB.getDb());
   setupListeners();
 });
@@ -200,10 +205,23 @@ function showPuzzle(index) {
 
 function setupListeners() {
   let introShown = false;
+  let pauseStartTime = null;
+
+  function pauseTimer() {
+    clearInterval(timerInterval);
+    pauseStartTime = Date.now();
+  }
+  function resumeTimer() {
+    if (pauseStartTime) {
+      startTimestamp += (Date.now() - pauseStartTime); // récupère le temps pausé
+      pauseStartTime = null;
+    }
+    if (startTimestamp) startTimerLoop();
+  }
+
 
   GameDB.onStateChange(state => {
     if (state.phase === 'playing') {
-      // ── Intro cinématique (une seule fois au lancement) ──
       if (!introShown && state.startTimestamp) {
         introShown = true;
         if (state.timeLimit) timeLimit = state.timeLimit;
@@ -213,16 +231,17 @@ function setupListeners() {
         startTimestamp = state.startTimestamp;
         startTimerLoop();
         AudioManager.gameStart();
-        Scenario.play('intro', () => { showPuzzle(0); });
+        Scenario.play('intro', () => { resumeTimer(); showPuzzle(0); },
+          { isController: true, onStart: pauseTimer });
         return;
       }
 
-      // ── Passage au puzzle suivant avec cinématique ──
       const newIdx = state.currentPuzzle || 0;
       if (newIdx !== lastPuzzleIndex && lastPuzzleIndex >= 0 && newIdx > 0) {
-        const cutId = 'cutscene_' + lastPuzzleIndex;
         AudioManager.puzzleNext();
-        Scenario.play(cutId, () => { showPuzzle(newIdx); });
+        Scenario.play('cutscene_' + lastPuzzleIndex,
+          () => { resumeTimer(); showPuzzle(newIdx); },
+          { isController: true, onStart: pauseTimer });
         return;
       }
       if (newIdx !== lastPuzzleIndex) showPuzzle(newIdx);
@@ -235,25 +254,18 @@ function setupListeners() {
       state.win ? AudioManager.victory() : AudioManager.defeat();
       Scenario.play(outroId, () => {
         const overlay = document.getElementById('end-overlay');
-        const card = document.getElementById('end-card');
+        const card    = document.getElementById('end-card');
         overlay.classList.add('visible');
         card.className = state.win ? 'win' : 'lose';
-        document.getElementById('end-title').textContent = state.win ? '🏆 VICTOIRE' : '💀 DÉFAITE';
+        document.getElementById('end-title').textContent  = state.win ? '🏆 VICTOIRE' : '💀 DÉFAITE';
         document.getElementById('end-reason').textContent = state.reason;
-      });
+      }, { isController: true });
     }
   });
 
   GameDB.onResult(result => {
-    if (result.valid) {
-      AudioManager.success();
-      showNotif('✅ ' + result.message, 'success');
-      log(result.message, 'ok');
-    } else {
-      AudioManager.error();
-      showNotif('❌ ' + result.message, 'error');
-      log(result.message, 'error');
-    }
+    if (result.valid) { AudioManager.success(); showNotif('✅ ' + result.message, 'success'); log(result.message, 'ok'); }
+    else              { AudioManager.error();   showNotif('❌ ' + result.message, 'error');   log(result.message, 'error'); }
   });
 
   GameDB.onDisconnect(() => {

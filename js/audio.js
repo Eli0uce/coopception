@@ -244,7 +244,7 @@ const AudioManager = (() => {
     setSfxEnabled, setMusicEnabled,
     // Raccourcis directs
     hover, click, beep, connect, gameStart, success, error,
-    countdown, countdownUrgent, victory, defeat, disconnect, puzzleNext, boot
+    countdown, countdownUrgent, victory, defeat, disconnect, puzzleNext, boot, typeBeep
   };
 })();
 

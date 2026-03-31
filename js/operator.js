@@ -15,6 +15,11 @@ if (!roomCode) { location.href = 'index.html'; }
 GameDB.rejoinRoom(roomCode, 'operator').then(() => {
   AudioManager.init();
   AudioManager.boot();
+  // Opérateur = spectateur des cinématiques (contrôlées par le Technicien)
+  Scenario.initSync(
+    (sceneId, lineIdx) => GameDB.setCinematicLine(sceneId, lineIdx),
+    (sceneId, cb)      => GameDB.onCinematicLine(sceneId, cb)
+  );
   VoiceChat.init('operator', roomCode, GameDB.getDb());
   setupListeners();
 });
@@ -172,7 +177,6 @@ function renderCipherOp(area, d) {
 }
 
 function renderCalibOp(area, d) {
-  const vals = [50,50,50];
   d.sliders.forEach((s,i) => {
     const grp = document.createElement('div'); grp.className='slider-group';
     grp.innerHTML=`<div class="slider-label"><span>${s.label}</span><span class="slider-val" id="val-${s.id}">50</span></div><input type="range" id="${s.id}" min="${s.min}" max="${s.max}" value="50">`;
@@ -180,7 +184,7 @@ function renderCalibOp(area, d) {
     setTimeout(() => {
       const slider = document.getElementById(s.id);
       const valEl = document.getElementById('val-'+s.id);
-      slider.addEventListener('input', () => { vals[i]=parseInt(slider.value); valEl.textContent=slider.value; });
+      slider.addEventListener('input', () => { valEl.textContent=slider.value; });
     }, 0);
   });
   const btn = document.createElement('button'); btn.className='validate-btn'; btn.textContent='✔ VALIDER CALIBRAGE';
@@ -282,6 +286,19 @@ function renderFinalOp(area, d) {
 // ── Firebase listeners ──
 function setupListeners() {
   let introShown = false;
+  let pauseStartTime = null;
+
+  function pauseTimer() {
+    clearInterval(timerInterval);
+    pauseStartTime = Date.now();
+  }
+  function resumeTimer() {
+    if (pauseStartTime) {
+      startTimestamp += (Date.now() - pauseStartTime);
+      pauseStartTime = null;
+    }
+    if (startTimestamp) startTimerLoop();
+  }
 
   GameDB.onStateChange(state => {
     if (state.phase === 'playing') {
@@ -294,15 +311,17 @@ function setupListeners() {
         startTimestamp = state.startTimestamp;
         startTimerLoop();
         AudioManager.gameStart();
-        Scenario.play('intro', () => { showPuzzle(0); });
+        Scenario.play('intro', () => { resumeTimer(); showPuzzle(0); },
+          { isController: false, onStart: pauseTimer });
         return;
       }
 
       const newIdx = state.currentPuzzle || 0;
       if (newIdx !== lastPuzzleIndex && lastPuzzleIndex >= 0 && newIdx > 0) {
-        const cutId = 'cutscene_' + lastPuzzleIndex;
         AudioManager.puzzleNext();
-        Scenario.play(cutId, () => { showPuzzle(newIdx); });
+        Scenario.play('cutscene_' + lastPuzzleIndex,
+          () => { resumeTimer(); showPuzzle(newIdx); },
+          { isController: false, onStart: pauseTimer });
         return;
       }
       if (newIdx !== lastPuzzleIndex) showPuzzle(newIdx);
@@ -315,12 +334,12 @@ function setupListeners() {
       state.win ? AudioManager.victory() : AudioManager.defeat();
       Scenario.play(outroId, () => {
         const overlay = document.getElementById('end-overlay');
-        const card = document.getElementById('end-card');
+        const card    = document.getElementById('end-card');
         overlay.classList.add('visible');
         card.className = state.win ? 'win' : 'lose';
-        document.getElementById('end-title').textContent = state.win ? '🏆 VICTOIRE' : '💀 DÉFAITE';
+        document.getElementById('end-title').textContent  = state.win ? '🏆 VICTOIRE' : '💀 DÉFAITE';
         document.getElementById('end-reason').textContent = state.reason;
-      });
+      }, { isController: false });
     }
   });
 

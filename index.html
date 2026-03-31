@@ -698,10 +698,7 @@ document.addEventListener('click', function onFirstClick() {
 }, { once: true });
 
 // ── Entrée sur la touche ENTER pour rejoindre ─────────────────
-document.getElementById('input-code').addEventListener('keydown', e => {
-  if (e.key === 'Enter') joinRoom();
-  setTimeout(() => { e.target.value = e.target.value.toUpperCase(); }, 0);
-});
+// (géré par lobby.js)
 </script>
 </body>
 </html>
