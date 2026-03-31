@@ -230,6 +230,7 @@ GameDB.onStateChange(state => {
   if (state.phase === 'playing') {
     document.getElementById('wait-overlay').style.display = 'none';
     document.getElementById('game-area').style.display = 'grid';
+    if (state.puzzlesSeed && PUZZLES.length === 0) initPuzzles(state.puzzlesSeed);
     if (!startTimestamp && state.startTimestamp) {
       startTimestamp = state.startTimestamp;
       startTimerLoop();

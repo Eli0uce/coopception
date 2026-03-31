@@ -54,8 +54,11 @@ const GameDB = (() => {
   }
 
   async function startGame() {
+    const puzzles = buildRandomPuzzles();
+    initPuzzles(JSON.stringify(puzzles));
     await db.ref(`rooms/${roomCode}/state`).update({
-      phase: 'playing', currentPuzzle: 0, startTimestamp: Date.now()
+      phase: 'playing', currentPuzzle: 0, startTimestamp: Date.now(),
+      puzzlesSeed: JSON.stringify(puzzles)
     });
   }
 
