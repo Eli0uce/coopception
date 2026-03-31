@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>HUB SPATIAL — Station Zéro</title>
+  <link rel="stylesheet" href="css/main.css">
+  <link rel="stylesheet" href="css/hub.css">
+
+  <!-- Three.js importmap (fichier local) -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "/js/vendor/three.module.min.js"
+    }
+  }
+  </script>
+</head>
+<body>
+<div class="scanline"></div>
+
+<!-- Canvas Three.js (arrière-plan 3D) -->
+<canvas id="hub-canvas"></canvas>
+
+<div class="hub-layout">
+
+  <!-- ── Header ── -->
+  <header class="hub-header">
+    <div class="hub-logo">
+      <div class="title">◈ HUB SPATIAL ◈</div>
+      <div class="subtitle">BASE DE COMMANDEMENT — SECTEUR ALPHA</div>
+    </div>
+    <div class="hub-meta">
+      <div class="meta-badge" id="meta-role">—</div>
+      <div class="meta-badge" id="meta-room">ROOM : —</div>
+    </div>
+  </header>
+
+  <!-- ── Main ── -->
+  <main class="hub-main">
+    <div class="section-title">MISSIONS DISPONIBLES</div>
+    <div class="mission-list" id="mission-list">
+      <!-- Généré par hub.js -->
+    </div>
+  </main>
+
+  <!-- ── Footer ── -->
+  <footer class="hub-footer">
+    <span>STATION ZÉRO — PROTOCOLE COOPÉRATIF v1.0</span>
+    <button class="lobby-link" id="btn-lobby">↩ RETOUR AU LOBBY</button>
+  </footer>
+
+</div>
+
+<script src="js/hub.js"></script>
+<!-- Scène Three.js chargée en module (après le DOM) -->
+<script type="module" src="js/hub-scene.js"></script>
+</body>
+</html>
+
