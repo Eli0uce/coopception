@@ -5,6 +5,15 @@ let currentPuzzle = null;
 let totalPuzzles = 1;
 let puzzleIndex = 0;
 let lastResources = null;
+let currentMaxAttempts = null;
+let currentHintCost = null;
+let currentHintsTotal = 0;
+let missionHintsRemainingCount = null;
+// Poignées (handlers) du puzzle courant pour le support clavier : Entrée
+// valide (si un envoi a du sens), Échap annule la sélection en cours —
+// jamais les connexions/affectations déjà validées côté serveur.
+let currentSubmitHandler = null;
+let currentClearHandler = null;
 const roomCode = sessionStorage.getItem('sz_room');
 
 // State for each puzzle type
@@ -12,6 +21,9 @@ let seqState = [];
 let finalState = { switch: null, code: '', levers: [], validate: false };
 let wireConnections = [];
 let wireSelected = null;
+let logicAssignments = []; // [{row, col}, ...]
+let valvePath = []; // [nodeId, ...]
+let parityState = []; // [bool, ...]
 
 if (!roomCode) { location.href = 'index.html'; }
 
@@ -75,6 +87,91 @@ function setMissionBanner(mission) {
   el.innerHTML = `<span class="mb-title">${mission.icon || ''} ${mission.title}</span>${mission.briefing}`;
 }
 
+// ── Barre d'objectif : mission / puzzle N sur total / tentatives / indices ──
+function setObjectiveHeader(missionTitle, pIndex, total) {
+  const mEl = document.getElementById('obj-mission-title');
+  const pEl = document.getElementById('obj-puzzle-progress');
+  if (mEl && missionTitle != null) mEl.textContent = missionTitle;
+  if (pEl) pEl.textContent = `${pIndex + 1} / ${total}`;
+}
+
+function setAttemptsDisplay(attempts, maxAttempts, flash) {
+  currentMaxAttempts = Number.isFinite(maxAttempts) ? maxAttempts : null;
+  const wrap = document.getElementById('obj-attempts-wrap');
+  const el = document.getElementById('obj-attempts');
+  if (!wrap || !el) return;
+  if (currentMaxAttempts == null && !attempts) { wrap.style.display = 'none'; return; }
+  wrap.style.display = 'flex';
+  el.textContent = currentMaxAttempts != null ? `${attempts} / ${currentMaxAttempts}` : `${attempts}`;
+  wrap.classList.remove('attempts-warning', 'attempts-danger', 'just-penalized');
+  if (currentMaxAttempts != null) {
+    const remaining = currentMaxAttempts - attempts;
+    if (remaining <= 0) wrap.classList.add('attempts-danger');
+    else if (remaining <= 1) wrap.classList.add('attempts-warning');
+  }
+  if (flash) {
+    requestAnimationFrame(() => {
+      wrap.classList.add('just-penalized');
+      setTimeout(() => wrap.classList.remove('just-penalized'), 600);
+    });
+  }
+}
+
+function formatCostParts(cost) {
+  const parts = [];
+  if (!cost) return parts;
+  if (cost.time) parts.push(`-${cost.time}s`);
+  if (cost.resourceDelta) {
+    Object.entries(cost.resourceDelta).forEach(([key, delta]) => {
+      if (delta) parts.push(`${RESOURCE_LABELS[key] || key.toUpperCase()} ${delta}`);
+    });
+  }
+  return parts;
+}
+
+function updateHintButtonState() {
+  const btn = document.getElementById('btn-hint');
+  if (!btn) return;
+  if (currentHintsTotal <= 0) { btn.style.display = 'none'; return; }
+  btn.style.display = 'inline-block';
+  const parts = formatCostParts(currentHintCost);
+  btn.textContent = `💡 INDICE${parts.length ? ' (' + parts.join(', ') + ')' : ' (gratuit)'}`;
+  btn.disabled = missionHintsRemainingCount === 0;
+}
+
+function setHintsDisplay(missionHintsRemaining) {
+  missionHintsRemainingCount = Number.isFinite(missionHintsRemaining) ? missionHintsRemaining : null;
+  const wrap = document.getElementById('obj-hints-wrap');
+  const el = document.getElementById('obj-hints');
+  if (wrap && el) {
+    if (missionHintsRemainingCount == null) {
+      wrap.style.display = 'none';
+    } else {
+      wrap.style.display = 'flex';
+      el.textContent = `${missionHintsRemainingCount} restant${missionHintsRemainingCount > 1 ? 's' : ''}`;
+    }
+  }
+  updateHintButtonState();
+}
+
+function flashPenalty() {
+  document.body.classList.add('penalty-flash');
+  setTimeout(() => document.body.classList.remove('penalty-flash'), 650);
+}
+
+// ── Clavier : Entrée valide le puzzle courant, Échap annule la sélection en
+// cours. Jamais actif si le focus est dans le tchat (Enter y a déjà un sens). ──
+document.addEventListener('keydown', (e) => {
+  if (document.activeElement && document.activeElement.id === 'chat-input') return;
+  if (e.key === 'Enter' && typeof currentSubmitHandler === 'function') {
+    e.preventDefault();
+    currentSubmitHandler();
+  } else if (e.key === 'Escape' && typeof currentClearHandler === 'function') {
+    e.preventDefault();
+    currentClearHandler();
+  }
+});
+
 function sendAction(action) {
   WS.send({ type: 'puzzle:action', action });
 }
@@ -82,10 +179,15 @@ function sendAction(action) {
 // ── Renderers ──
 function renderPuzzle(puzzle) {
   currentPuzzle = puzzle;
+  currentSubmitHandler = null;
+  currentClearHandler = null;
   seqState = [];
   finalState = { switch: null, code: '', levers: [], validate: false };
   wireConnections = [];
   wireSelected = null;
+  logicAssignments = [];
+  valvePath = [];
+  parityState = [];
   const area = document.getElementById('controls-area');
   area.innerHTML = '';
 
@@ -102,6 +204,9 @@ function renderPuzzle(puzzle) {
     case 'calibration': renderCalibOp(area, puzzle.data); break;
     case 'final_protocol': renderFinalOp(area, puzzle.data); break;
     case 'wire_panel': renderWirePanelOp(area, puzzle.data); break;
+    case 'logic_grid': renderLogicGridOp(area, puzzle.data); break;
+    case 'valve_routing': renderValveRoutingOp(area, puzzle.data); break;
+    case 'parity_checksum': renderParityChecksumOp(area, puzzle.data); break;
     case 'choice': renderChoiceOp(area, puzzle.data); break;
   }
 }
@@ -148,6 +253,9 @@ function renderCrossCodeOp(area, data) {
   row.appendChild(btnDel);
   row.appendChild(btnSend);
   area.appendChild(row);
+
+  currentSubmitHandler = () => sendAction({ sequence: seqState });
+  currentClearHandler = () => { seqState = []; entered.innerHTML = ''; statusLog('Séquence effacée', 'var(--amber-dim)'); };
 }
 
 // Puzzle 2 : boutons colorés
@@ -191,6 +299,9 @@ function renderMirrorOp(area, data) {
   row.appendChild(btnDel);
   row.appendChild(btnSend);
   area.appendChild(row);
+
+  currentSubmitHandler = () => sendAction({ sequence: seqState });
+  currentClearHandler = () => { seqState = []; pressed.innerHTML = ''; statusLog('Séquence effacée', 'var(--amber-dim)'); };
 }
 
 // Puzzle 3 : texte chiffré + input
@@ -219,6 +330,10 @@ function renderCipherOp(area, data) {
   wrap.appendChild(inp);
   wrap.appendChild(btn);
   area.appendChild(wrap);
+
+  currentSubmitHandler = () => sendAction({ word: inp.value.trim() });
+  currentClearHandler = () => { inp.value = ''; inp.focus(); };
+  setTimeout(() => inp.focus(), 0);
 }
 
 // Puzzle 4 : curseurs
@@ -252,10 +367,29 @@ function renderCalibOp(area, data) {
     sendAction({ values: v });
   };
   area.appendChild(btn);
+
+  currentSubmitHandler = () => {
+    const v = data.sliders.map(s => parseInt(document.getElementById(s.id).value, 10));
+    sendAction({ values: v });
+  };
+  currentClearHandler = () => {
+    data.sliders.forEach(s => {
+      const slider = document.getElementById(s.id);
+      const valEl = document.getElementById('val-' + s.id);
+      if (slider) slider.value = 50;
+      if (valEl) valEl.textContent = '50';
+    });
+    statusLog('Curseurs réinitialisés', 'var(--amber-dim)');
+  };
 }
 
 // Puzzle 5 : protocole final
 function renderFinalOp(area, data) {
+  const hint = document.createElement('div');
+  hint.className = 'affordance-hint';
+  hint.textContent = 'Exécutez chaque commande dictée par le Technicien, dans l\'ordre. La VALIDATION FINALE demande une confirmation — relisez l\'état avant de confirmer.';
+  area.appendChild(hint);
+
   const grid = document.createElement('div');
   grid.style.cssText = 'display:flex;flex-direction:column;gap:14px;';
 
@@ -269,9 +403,11 @@ function renderFinalOp(area, data) {
     btn.dataset.color = c.color;
     btn.id = c.id;
     btn.textContent = c.label;
+    btn.setAttribute('aria-pressed', 'false');
     btn.onclick = () => {
-      document.querySelectorAll('.switch-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.switch-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
       btn.classList.add('active');
+      btn.setAttribute('aria-pressed', 'true');
       finalState.switch = c.id;
       statusLog(`Interrupteur ${c.label} activé`, 'var(--amber)');
     };
@@ -314,14 +450,17 @@ function renderFinalOp(area, data) {
     btn.className = 'lever-btn';
     btn.id = c.id;
     btn.textContent = c.label;
+    btn.setAttribute('aria-pressed', 'false');
     btn.onclick = () => {
       if (!finalState.levers.includes(c.id)) {
         finalState.levers.push(c.id);
         btn.classList.add('active');
+        btn.setAttribute('aria-pressed', 'true');
         statusLog(`${c.label} activé`, 'var(--amber)');
       } else {
         finalState.levers = finalState.levers.filter(l => l !== c.id);
         btn.classList.remove('active');
+        btn.setAttribute('aria-pressed', 'false');
       }
     };
     leverRow.appendChild(btn);
@@ -331,20 +470,39 @@ function renderFinalOp(area, data) {
 
   area.appendChild(grid);
 
+  function submitFinal() {
+    const summary = `Interrupteur : ${finalState.switch || 'aucun'}\nCode : ${finalState.code || '(vide)'}\nLeviers : ${finalState.levers.length ? finalState.levers.join(', ') : 'aucun'}`;
+    if (!confirm(`Confirmer la VALIDATION FINALE ?\n${summary}`)) return;
+    finalState.validate = true;
+    sendAction({ finalState });
+    statusLog('Validation envoyée !', 'var(--green)');
+  }
+
   const validateBtn = document.createElement('button');
   validateBtn.className = 'validate-btn';
   validateBtn.style.marginTop = '20px';
   validateBtn.textContent = '🔴 VALIDATION FINALE';
-  validateBtn.onclick = () => {
-    finalState.validate = true;
-    sendAction({ finalState });
-    statusLog('Validation envoyée !', 'var(--green)');
-  };
+  validateBtn.onclick = submitFinal;
   area.appendChild(validateBtn);
+
+  currentSubmitHandler = submitFinal;
+  currentClearHandler = () => {
+    finalState = { switch: null, code: '', levers: [], validate: false };
+    document.querySelectorAll('.switch-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
+    document.querySelectorAll('.lever-btn').forEach(b => { b.classList.remove('active'); b.setAttribute('aria-pressed', 'false'); });
+    const disp = document.getElementById('final-numdisp');
+    if (disp) disp.textContent = '';
+    statusLog('Protocole réinitialisé', 'var(--amber-dim)');
+  };
 }
 
 // Puzzle 6 : panneau de câblage (wire_panel)
 function renderWirePanelOp(area, data) {
+  const hint = document.createElement('div');
+  hint.className = 'affordance-hint';
+  hint.textContent = '1. Cliquez un FIL (il s\'allume en ambre = sélectionné) → 2. Cliquez le PORT de destination dicté par le Technicien (il devient vert = connecté). Cliquez un fil déjà connecté pour le débrancher. Échap annule la sélection en cours.';
+  area.appendChild(hint);
+
   const connDisplay = document.createElement('div');
   connDisplay.className = 'wire-connections';
   connDisplay.id = 'wire-connections-display';
@@ -352,7 +510,7 @@ function renderWirePanelOp(area, data) {
 
   function refreshConnDisplay() {
     connDisplay.innerHTML = wireConnections.length
-      ? wireConnections.map(c => `<span class="conn-chip">${c.wire} → ${c.port}</span>`).join('')
+      ? wireConnections.map(c => `<span class="conn-chip">✓ ${c.wire} → ${c.port}</span>`).join('')
       : '<span style="color:var(--amber-dim);">Aucune connexion établie</span>';
   }
   refreshConnDisplay();
@@ -367,20 +525,23 @@ function renderWirePanelOp(area, data) {
     const btn = document.createElement('button');
     btn.className = 'wire-btn';
     btn.textContent = w;
+    btn.setAttribute('aria-pressed', 'false');
     btn.onclick = () => {
       // Débrancher si déjà connecté
       const existing = wireConnections.find(c => c.wire === w);
       if (existing) {
         wireConnections = wireConnections.filter(c => c.wire !== w);
         btn.classList.remove('connected');
+        btn.setAttribute('aria-pressed', 'false');
         refreshConnDisplay();
         refreshPorts();
         statusLog(`${w} débranché`, 'var(--amber)');
         return;
       }
-      document.querySelectorAll('.wire-btn').forEach(b => b.classList.remove('selected'));
+      document.querySelectorAll('.wire-btn').forEach(b => { b.classList.remove('selected'); });
       wireSelected = w;
       btn.classList.add('selected');
+      btn.setAttribute('aria-pressed', 'true');
       statusLog(`Fil ${w} sélectionné — choisissez un port`, 'var(--amber)');
     };
     wireBtns[w] = btn;
@@ -407,6 +568,7 @@ function renderWirePanelOp(area, data) {
       wireConnections.push({ wire: wireSelected, port: p });
       wireBtns[wireSelected].classList.remove('selected');
       wireBtns[wireSelected].classList.add('connected');
+      wireBtns[wireSelected].setAttribute('aria-pressed', 'true');
       statusLog(`${wireSelected} connecté à ${p}`, 'var(--green)');
       wireSelected = null;
       refreshConnDisplay();
@@ -423,10 +585,258 @@ function renderWirePanelOp(area, data) {
   btn.textContent = '✔ VALIDER LE CÂBLAGE';
   btn.onclick = () => sendAction({ connections: wireConnections });
   area.appendChild(btn);
+
+  currentSubmitHandler = () => sendAction({ connections: wireConnections });
+  // Échap : annule le fil en cours de sélection (armé, pas encore connecté) ;
+  // s'il n'y en a pas, débranche la dernière connexion établie (annulation
+  // incrémentale et réversible, jamais une remise à zéro brutale).
+  currentClearHandler = () => {
+    if (wireSelected) {
+      const b = wireBtns[wireSelected];
+      if (b) { b.classList.remove('selected'); b.setAttribute('aria-pressed', 'false'); }
+      wireSelected = null;
+      statusLog('Sélection de fil annulée', 'var(--amber-dim)');
+      return;
+    }
+    const last = wireConnections.pop();
+    if (last) {
+      const b = wireBtns[last.wire];
+      if (b) { b.classList.remove('connected'); b.setAttribute('aria-pressed', 'false'); }
+      refreshConnDisplay();
+      refreshPorts();
+      statusLog(`${last.wire} débranché (annulation)`, 'var(--amber-dim)');
+    }
+  };
 }
 
-// Puzzle 7 : décision (choice)
+// Puzzle 8 : grille de déduction logique (logic_grid) — l'Opérateur ne voit
+// que les catégories (lignes/colonnes), jamais les indices : c'est le
+// Technicien qui a déduit la réponse et la dicte case par case.
+function renderLogicGridOp(area, data) {
+  const hint = document.createElement('div');
+  hint.className = 'affordance-hint';
+  hint.textContent = 'Le Technicien a déduit la grille : cochez UNE case par ligne (●) selon ses instructions. Cliquer une case cochée la décoche. Échap réinitialise toute la grille.';
+  area.appendChild(hint);
+
+  const legend = document.createElement('div');
+  legend.style.cssText = 'font-size:10px;color:var(--amber-dim);letter-spacing:1px;margin-bottom:8px;';
+  legend.textContent = '○ non coché  ·  ● coché (une seule case par ligne)';
+  area.appendChild(legend);
+
+  const display = document.createElement('div');
+  display.className = 'wire-connections';
+  area.appendChild(display);
+
+  function refreshDisplay() {
+    display.innerHTML = logicAssignments.length
+      ? logicAssignments.map(a => `<span class="conn-chip">${a.row} → ${a.col}</span>`).join('')
+      : '<span style="color:var(--amber-dim);">Aucune case cochée</span>';
+  }
+  refreshDisplay();
+
+  const grid = document.createElement('div');
+  grid.className = 'logic-grid-table';
+  grid.style.cssText = 'display:grid;grid-template-columns:auto repeat(' + data.cols.length + ', 1fr);gap:6px;margin:14px 0;';
+
+  grid.appendChild(document.createElement('div'));
+  data.cols.forEach(col => {
+    const h = document.createElement('div');
+    h.className = 'logic-grid-head';
+    h.textContent = col;
+    grid.appendChild(h);
+  });
+
+  const cellsByRow = {};
+  data.rows.forEach(row => {
+    const rowLabel = document.createElement('div');
+    rowLabel.className = 'logic-grid-head';
+    rowLabel.textContent = row;
+    grid.appendChild(rowLabel);
+
+    cellsByRow[row] = [];
+    data.cols.forEach(col => {
+      const cell = document.createElement('button');
+      cell.className = 'logic-grid-cell';
+      cell.textContent = '○';
+      cell.setAttribute('aria-pressed', 'false');
+      cell.setAttribute('aria-label', `${row} → ${col}`);
+      cell.onclick = () => {
+        const already = logicAssignments.find(a => a.row === row && a.col === col);
+        // Une seule case cochée par ligne : enlever toute autre case de cette ligne
+        logicAssignments = logicAssignments.filter(a => a.row !== row);
+        cellsByRow[row].forEach(c => { c.classList.remove('checked'); c.textContent = '○'; c.setAttribute('aria-pressed', 'false'); });
+        if (!already) {
+          logicAssignments.push({ row, col });
+          cell.classList.add('checked');
+          cell.textContent = '●';
+          cell.setAttribute('aria-pressed', 'true');
+          statusLog(`${row} → ${col}`, 'var(--amber)');
+        }
+        refreshDisplay();
+      };
+      cellsByRow[row].push(cell);
+      grid.appendChild(cell);
+    });
+  });
+  area.appendChild(grid);
+
+  const btn = document.createElement('button');
+  btn.className = 'validate-btn';
+  btn.textContent = '✔ VALIDER LA GRILLE';
+  btn.onclick = () => sendAction({ assignments: logicAssignments });
+  area.appendChild(btn);
+
+  currentSubmitHandler = () => sendAction({ assignments: logicAssignments });
+  currentClearHandler = () => {
+    logicAssignments = [];
+    Object.values(cellsByRow).forEach(cells => cells.forEach(c => { c.classList.remove('checked'); c.textContent = '○'; c.setAttribute('aria-pressed', 'false'); }));
+    refreshDisplay();
+    statusLog('Grille réinitialisée', 'var(--amber-dim)');
+  };
+}
+
+// Puzzle 9 : réseau de vannes/conduits (valve_routing) — l'Opérateur ne peut
+// avancer que de nœud en nœud adjacent, guidé pas à pas par le Technicien.
+function renderValveRoutingOp(area, data) {
+  const hint = document.createElement('div');
+  hint.className = 'affordance-hint';
+  hint.textContent = 'Cliquez les nœuds un par un, en suivant uniquement les connexions dictées par le Technicien. Les nœuds accessibles depuis votre position actuelle sont surlignés en vert. Échap annule le dernier nœud.';
+  area.appendChild(hint);
+
+  const pathDisplay = document.createElement('div');
+  pathDisplay.className = 'current-seq';
+  area.appendChild(pathDisplay);
+
+  function refreshPath() {
+    pathDisplay.innerHTML = valvePath.length
+      ? valvePath.map(n => `<span class="seq-chip">${n}</span>`).join('')
+      : '<span style="color:var(--amber-dim);">Aucun nœud sélectionné</span>';
+  }
+  refreshPath();
+
+  const info = document.createElement('div');
+  info.style.cssText = 'font-size:12px;color:var(--amber-dim);letter-spacing:1px;margin-bottom:10px;';
+  info.textContent = `ENTRÉE : ${data.start}  —  SORTIE : ${data.exit}`;
+  area.appendChild(info);
+
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;';
+  const nodeBtns = {};
+
+  // Surligne les nœuds accessibles en un pas depuis la position courante —
+  // rend "ce qui est cliquable ensuite" évident sans devoir mémoriser le
+  // schéma complet.
+  function refreshValidNext() {
+    const last = valvePath[valvePath.length - 1];
+    data.nodes.forEach(node => {
+      const btn = nodeBtns[node];
+      if (!btn) return;
+      const used = valvePath.includes(node);
+      let isValidNext;
+      if (valvePath.length === 0) isValidNext = node === data.start;
+      else isValidNext = !used && data.edges.some(e => (e[0] === last && e[1] === node) || (e[0] === node && e[1] === last));
+      btn.classList.toggle('valid-next', isValidNext);
+    });
+  }
+
+  data.nodes.forEach(node => {
+    const btn = document.createElement('button');
+    btn.className = 'wire-btn';
+    btn.textContent = node;
+    btn.onclick = () => {
+      const last = valvePath[valvePath.length - 1];
+      if (valvePath.length === 0) {
+        if (node !== data.start) { statusLog(`Le circuit doit démarrer à ${data.start}`, 'var(--red)'); return; }
+      } else {
+        const linked = data.edges.some(e => (e[0] === last && e[1] === node) || (e[0] === node && e[1] === last));
+        if (!linked) { statusLog(`${last} n'est pas relié à ${node}`, 'var(--red)'); return; }
+      }
+      valvePath.push(node);
+      refreshPath();
+      refreshValidNext();
+      statusLog(`Nœud ${node} ajouté au circuit`, 'var(--amber)');
+    };
+    nodeBtns[node] = btn;
+    grid.appendChild(btn);
+  });
+  area.appendChild(grid);
+  refreshValidNext();
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:10px;margin-top:10px;';
+  const btnDel = document.createElement('button');
+  btnDel.className = 'btn danger';
+  btnDel.textContent = '⌫ RETOUR';
+  btnDel.onclick = () => { valvePath.pop(); refreshPath(); refreshValidNext(); };
+  const btnSend = document.createElement('button');
+  btnSend.className = 'btn primary';
+  btnSend.textContent = '✔ VALIDER LE CIRCUIT';
+  btnSend.onclick = () => sendAction({ path: valvePath });
+  row.appendChild(btnDel);
+  row.appendChild(btnSend);
+  area.appendChild(row);
+
+  currentSubmitHandler = () => sendAction({ path: valvePath });
+  currentClearHandler = () => { valvePath.pop(); refreshPath(); refreshValidNext(); };
+}
+
+// Puzzle 10 : panneau de parité (parity_checksum) — l'Opérateur ne voit ni
+// poids ni cible, seulement des commutateurs nus à actionner sur dictée.
+function renderParityChecksumOp(area, data) {
+  const hint = document.createElement('div');
+  hint.className = 'affordance-hint';
+  hint.textContent = 'Activez/désactivez chaque commutateur dicté par le Technicien (ON = vert, OFF = éteint). Lui seul connaît poids et cible — vous ne faites qu\'exécuter.';
+  area.appendChild(hint);
+
+  parityState = new Array(data.switchCount).fill(false);
+  const grid = document.createElement('div');
+  grid.className = 'switch-group';
+  for (let i = 0; i < data.switchCount; i++) {
+    const btn = document.createElement('button');
+    btn.className = 'switch-btn';
+    btn.dataset.color = 'green';
+    btn.setAttribute('aria-pressed', 'false');
+    btn.innerHTML = `#${i + 1}<span class="switch-state">OFF</span>`;
+    btn.onclick = () => {
+      parityState[i] = !parityState[i];
+      btn.classList.toggle('active', parityState[i]);
+      btn.setAttribute('aria-pressed', String(parityState[i]));
+      btn.querySelector('.switch-state').textContent = parityState[i] ? 'ON' : 'OFF';
+      statusLog(`Commutateur #${i + 1} → ${parityState[i] ? 'ON' : 'OFF'}`, 'var(--amber)');
+    };
+    grid.appendChild(btn);
+  }
+  area.appendChild(grid);
+
+  const btn = document.createElement('button');
+  btn.className = 'validate-btn';
+  btn.style.marginTop = '20px';
+  btn.textContent = '✔ VALIDER LA PARITÉ';
+  btn.onclick = () => sendAction({ switches: parityState });
+  area.appendChild(btn);
+
+  currentSubmitHandler = () => sendAction({ switches: parityState });
+  currentClearHandler = () => {
+    parityState = parityState.map(() => false);
+    grid.querySelectorAll('.switch-btn').forEach((b, i) => {
+      b.classList.remove('active');
+      b.setAttribute('aria-pressed', 'false');
+      const stateEl = b.querySelector('.switch-state');
+      if (stateEl) stateEl.textContent = 'OFF';
+    });
+    statusLog('Commutateurs réinitialisés', 'var(--amber-dim)');
+  };
+}
+
+// Puzzle 11 : décision (choice) — conséquences narratives réelles (ressources
+// / drapeaux de campagne) : une confirmation est exigée pour ne jamais valider
+// par inadvertance un simple clic.
 function renderChoiceOp(area, data) {
+  const hint = document.createElement('div');
+  hint.className = 'affordance-hint';
+  hint.textContent = 'Mettez-vous d\'accord avec le Technicien avant de cliquer — chaque option a des conséquences réelles et une confirmation vous sera demandée.';
+  area.appendChild(hint);
+
   const group = document.createElement('div');
   group.className = 'choice-btn-group';
   data.options.forEach(o => {
@@ -434,6 +844,7 @@ function renderChoiceOp(area, data) {
     btn.className = 'choice-btn';
     btn.textContent = o.label;
     btn.onclick = () => {
+      if (!confirm(`Confirmer la décision : "${o.label}" ?\nCette action a des conséquences durables sur la campagne.`)) return;
       document.querySelectorAll('.choice-btn').forEach(b => b.classList.remove('chosen'));
       btn.classList.add('chosen');
       statusLog(`Décision sélectionnée : ${o.label}`, 'var(--green)');
@@ -453,7 +864,12 @@ function applyMissionState(msg) {
   if (msg.mission) setMissionBanner(msg.mission);
   document.getElementById('module-name').textContent = msg.puzzle.module;
   document.getElementById('footer-status').textContent = `PUZZLE ${puzzleIndex + 1}/${totalPuzzles}`;
+  setObjectiveHeader(msg.mission && msg.mission.title, puzzleIndex, totalPuzzles);
   buildDots(totalPuzzles, puzzleIndex);
+  currentHintCost = (msg.puzzle && msg.puzzle.hintCost) || null;
+  currentHintsTotal = (msg.puzzle && Number.isFinite(msg.puzzle.hintsTotal)) ? msg.puzzle.hintsTotal : 0;
+  setAttemptsDisplay(msg.attempts || 0, msg.puzzle && msg.puzzle.maxAttempts, false);
+  setHintsDisplay(Number.isFinite(msg.missionHintsRemaining) ? msg.missionHintsRemaining : null);
   renderPuzzle(msg.puzzle);
   if (msg.resources) { lastResources = { ...msg.resources }; }
   setTimer(msg.timeLeft);
@@ -483,7 +899,12 @@ WS.on('puzzle:next', (msg) => {
   puzzleIndex = msg.puzzleIndex;
   document.getElementById('module-name').textContent = msg.module;
   document.getElementById('footer-status').textContent = `PUZZLE ${puzzleIndex + 1}/${totalPuzzles}`;
+  setObjectiveHeader(null, puzzleIndex, totalPuzzles);
   buildDots(totalPuzzles, puzzleIndex);
+  currentHintCost = (msg.puzzle && msg.puzzle.hintCost) || null;
+  currentHintsTotal = (msg.puzzle && Number.isFinite(msg.puzzle.hintsTotal)) ? msg.puzzle.hintsTotal : 0;
+  setAttemptsDisplay(msg.attempts || 0, msg.puzzle && msg.puzzle.maxAttempts, false);
+  setHintsDisplay(Number.isFinite(msg.missionHintsRemaining) ? msg.missionHintsRemaining : missionHintsRemainingCount);
   renderPuzzle(msg.puzzle);
   statusLog(`Nouveau module : ${msg.module}`, 'var(--green)');
 });
@@ -491,18 +912,37 @@ WS.on('puzzle:next', (msg) => {
 WS.on('puzzle:solved', (msg) => {
   showNotif('✅ ' + msg.message, 'success');
   statusLog(msg.message, 'var(--green)');
+  if (Number.isFinite(msg.attempts)) setAttemptsDisplay(msg.attempts, currentMaxAttempts, false);
   if (msg.resources) logResourceDiff(msg.resources);
 });
 
 WS.on('puzzle:failed', (msg) => {
   showNotif('❌ ' + msg.message, 'error');
   statusLog(msg.message, 'var(--red)');
+  const hasPenalty = !!(msg.timePenalty || msg.resourcePenalty);
+  if (msg.timePenalty) statusLog(`Pénalité de tentative : -${msg.timePenalty}s`, 'var(--red)');
+  if (msg.resourcePenalty) {
+    Object.entries(msg.resourcePenalty).forEach(([key, delta]) => {
+      if (delta) statusLog(`Pénalité : ${RESOURCE_LABELS[key] || key.toUpperCase()} ${delta}`, 'var(--red)');
+    });
+  }
+  if (Number.isFinite(msg.attempts)) {
+    setAttemptsDisplay(msg.attempts, Number.isFinite(msg.maxAttempts) ? msg.maxAttempts : currentMaxAttempts, true);
+  }
+  if (hasPenalty) flashPenalty();
+  if (msg.resources) logResourceDiff(msg.resources);
+  if (msg.timeLeft != null) setTimer(msg.timeLeft);
 });
 
 WS.on('hint:response', (msg) => {
+  if (Number.isFinite(msg.missionHintsRemaining)) setHintsDisplay(msg.missionHintsRemaining);
   if (msg.text) {
-    statusLog('💡 ' + msg.text, 'var(--green)');
-    showNotif('💡 Indice reçu', 'success');
+    const parts = formatCostParts(msg.cost);
+    const costText = parts.length ? ` (coût : ${parts.join(', ')})` : '';
+    statusLog('💡 ' + msg.text + costText, 'var(--green)');
+    showNotif('💡 Indice reçu' + costText, 'success');
+    if (msg.resources) logResourceDiff(msg.resources);
+    if (msg.timeLeft != null) setTimer(msg.timeLeft);
   } else {
     showNotif(msg.message || 'Aucun indice disponible', 'error');
   }
@@ -555,7 +995,17 @@ WS.on('error', (msg) => {
 // ── Actions locales ──
 document.getElementById('btn-hub').addEventListener('click', () => { location.href = 'hub.html'; });
 document.getElementById('btn-end-hub').addEventListener('click', () => { location.href = 'hub.html'; });
-document.getElementById('btn-hint').addEventListener('click', () => { WS.send({ type: 'hint:request' }); });
+document.getElementById('btn-hint').addEventListener('click', () => {
+  const btn = document.getElementById('btn-hint');
+  if (btn.disabled) return;
+  const parts = formatCostParts(currentHintCost).map(p => p.replace(/^-/, '')).join(', ');
+  const costMsg = parts || 'aucun coût';
+  const budgetMsg = missionHintsRemainingCount != null
+    ? `\nIndices restants pour cette mission après celui-ci : ${Math.max(0, missionHintsRemainingCount - 1)}`
+    : '';
+  if (!confirm(`Révéler un indice ?\nCoût : ${costMsg}${budgetMsg}`)) return;
+  WS.send({ type: 'hint:request' });
+});
 document.getElementById('btn-abandon').addEventListener('click', () => {
   if (confirm('Abandonner la mission en cours et revenir au Hub ?')) {
     WS.send({ type: 'hub:return' });

@@ -48,6 +48,13 @@
     <div class="module-name" id="module-name">MODULE ???</div>
   </div>
 
+  <div class="objective-bar" id="objective-bar">
+    <span class="obj-item"><span class="obj-label">MISSION</span><span id="obj-mission-title">—</span></span>
+    <span class="obj-item"><span class="obj-label">PUZZLE</span><span id="obj-puzzle-progress">—</span></span>
+    <span class="obj-item" id="obj-attempts-wrap" style="display:none;"><span class="obj-label">TENTATIVES</span><span id="obj-attempts">—</span></span>
+    <span class="obj-item" id="obj-hints-wrap" style="display:none;"><span class="obj-label">INDICES MISSION</span><span id="obj-hints">—</span></span>
+  </div>
+
   <div class="mission-banner" id="mission-banner"></div>
 
   <div class="tech-main">
@@ -55,7 +62,7 @@
       <div id="puzzle-info"></div>
     </div>
     <div class="terminal-block" id="log-panel" data-title="LOG SYSTÈME">
-      <div id="log-content" style="color:var(--green-dim);font-size:13px;line-height:2;"></div>
+      <div id="log-content" style="color:var(--green-dim);font-size:13px;line-height:2;" aria-live="polite"></div>
     </div>
   </div>
 

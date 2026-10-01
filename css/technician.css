@@ -176,3 +176,27 @@
 .choice-option-row .opt-label { color: var(--green); }
 .choice-option-row .opt-hint { color: var(--amber); font-size: 11px; letter-spacing: 1px; }
 
+
+/* ── Barre d'objectif (thème vert) ── */
+.tech-layout .objective-bar { border-color: var(--border); background: rgba(0,20,0,0.35); }
+
+/* ── Boutons désactivés (indices épuisés, etc.) ── */
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  filter: grayscale(0.4);
+}
+.btn:disabled:hover { background: transparent; color: var(--green); box-shadow: none; }
+.btn.danger:disabled:hover { color: var(--red); }
+
+/* ── Responsive : pas de scroll horizontal à 1440/1280/1024/768 ── */
+@media (max-width: 1024px) {
+  .tech-layout { max-width: 100%; padding: 12px; gap: 12px; }
+  .tech-header { flex-wrap: wrap; gap: 8px; }
+}
+@media (max-width: 768px) {
+  .tech-main { grid-template-columns: 1fr; }
+  .objective-bar { font-size: 11px; gap: 6px 14px; }
+  .cipher-key { grid-template-columns: repeat(3, 1fr); }
+  #timer-display { font-size: 36px; }
+}

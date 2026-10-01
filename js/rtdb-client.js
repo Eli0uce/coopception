@@ -20,15 +20,25 @@
  * ── Schéma Realtime Database ───────────────────────────────────────────────
  *  rooms/{code}/meta             { technicianUid, operatorUid,
  *                                  technicianOnline, operatorOnline, createdAt }
- *  rooms/{code}/campaign         état de campagne (sanitizeCampaign)
+ *  rooms/{code}/campaign         état de campagne (sanitizeCampaign) — inclut
+ *                                 désormais `ngPlus` (cycle New Game+) et
+ *                                 `bestStars` (record d'étoiles par mission,
+ *                                 survit aux rejeux complets)
  *  rooms/{code}/phase            'hub' | 'mission'
  *  rooms/{code}/mission          runtime de la mission active (autorité
- *                                 Technicien) + `lastEvent` pour les
- *                                 notifications ponctuelles (puzzle résolu/
- *                                 raté, indice, avancée de puzzle, démarrage)
+ *                                 Technicien), y compris `isReplay` (rejeu
+ *                                 d'une mission déjà terminée : pas de double
+ *                                 récompense/conséquence, voir CampaignEngine)
+ *                                 et `ngPlus` (cycle au moment du démarrage)
+ *                                 + `lastEvent` pour les notifications
+ *                                 ponctuelles (puzzle résolu/raté — avec
+ *                                 pénalité de tentative éventuelle —, indice
+ *                                 — avec coût éventuel —, avancée de puzzle,
+ *                                 démarrage)
  *  rooms/{code}/result           résultat de fin de mission (succès/échec)
  *  rooms/{code}/roomEvent        notifications hors-mission (room:ready,
- *                                 mission:aborted, campaign:reset, erreurs
+ *                                 mission:aborted, campaign:reset,
+ *                                 campaign:replayed [New Game+], erreurs
  *                                 ciblées) — un seul slot, horodaté
  *  rooms/{code}/requests/{id}    file d'actions Opérateur → Technicien,
  *                                 consommée (puis supprimée) par le Technicien
@@ -90,7 +100,20 @@ const WS = (() => {
   }
 
   function missionSummary(mission) {
-    return { id: mission.id, title: mission.title, codename: mission.codename, briefing: mission.briefing, icon: mission.icon };
+    return {
+      id: mission.id, title: mission.title, codename: mission.codename, briefing: mission.briefing, icon: mission.icon,
+      difficulty: mission.difficulty, timeLimit: mission.timeLimit, maxHintsPerMission: Number.isFinite(mission.maxHintsPerMission) ? mission.maxHintsPerMission : null,
+      puzzleCount: mission.puzzles.length
+    };
+  }
+
+  /** Indices restants au niveau de la mission (budget global, voir
+   * mission.maxHintsPerMission) à un instant donné — null si la mission n'a
+   * pas de plafond. Utilisé pour afficher "indices restants" côté UI sans
+   * dupliquer la logique de budget déjà imposée par CampaignEngine.getHint. */
+  function missionHintsRemaining(mission, totalHintsUsed) {
+    if (!Number.isFinite(mission.maxHintsPerMission)) return null;
+    return Math.max(0, mission.maxHintsPerMission - (totalHintsUsed || 0));
   }
 
   function emitHubStateFromCampaign(rawCampaign) {
@@ -131,8 +154,9 @@ const WS = (() => {
       lastTs = ev.ts;
       if (ev.onlyRole && ev.onlyRole !== role) return;
       const { type, ts, onlyRole, ...rest } = ev;
-      if (type === 'campaign:reset' || type === 'campaign:restored') {
+      if (type === 'campaign:reset' || type === 'campaign:restored' || type === 'campaign:replayed') {
         if (type === 'campaign:reset') emit('campaign:reset', {});
+        if (type === 'campaign:replayed') emit('campaign:replay', {});
         try {
           const campaignSnap = await roomRef('campaign').once('value');
           emitHubStateFromCampaign(campaignSnap.val());
@@ -163,19 +187,47 @@ const WS = (() => {
   }
 
   // ── rooms/{code}/mission : écouteur côté Opérateur ──
-  function attachOperatorMissionListener(seedEventTs, seedTimeLeft) {
-    let lastEventTs = seedEventTs || 0;
+  function attachOperatorMissionListener(seedEventSeq, seedTimeLeft) {
+    // Ordonnancement par compteur monotone (`seq`), pas par `ts` : deux
+    // événements d'autorité rapprochés peuvent partager la même milliseconde
+    // Date.now(), ce qui ferait ignorer silencieusement un événement côté
+    // Opérateur si l'on comparait seulement des timestamps (`>` strict).
+    //
+    // `seq` est remis à zéro à CHAQUE nouveau départ de mission (y compris un
+    // rejeu de la même mission) par `CampaignEngine.startMissionRuntime` : un
+    // événement `kind: 'started'` doit donc toujours être traité, même si sa
+    // valeur `seq` est numériquement inférieure au dernier événement vu de
+    // l'exécution précédente — sans quoi un rejeu de mission resterait bloqué
+    // côté Opérateur (la mission ne démarre jamais visuellement). `lastKey`
+    // (missionId+seq) protège contre un double-traitement si Firebase (ou un
+    // reconnect) refait feu l'événement 'value' avec des données inchangées.
+    let lastEventSeq = seedEventSeq || 0;
+    let lastKey = null;
     let lastTimeLeft = seedTimeLeft;
     roomRef('mission').on('value', snap => {
       const m = snap.val();
       if (!m) return; // phase repassée au hub : géré via result/roomEvent
-      const mission = CampaignEngine.findMission(m.missionId);
-      if (!mission) return;
+      const rawMission = CampaignEngine.findMission(m.missionId);
+      if (!rawMission) return;
+      // Version effective (durcie NG+, voir getEffectiveMission) : les champs
+      // de difficulté ajoutés à getPuzzleForRole (maxAttempts, pénalités,
+      // coût des indices…) doivent refléter le MÊME cycle que celui utilisé
+      // par l'autorité Technicien, pas la version de base.
+      const mission = CampaignEngine.getEffectiveMission(rawMission, m.ngPlus || 0);
 
-      if (m.lastEvent && m.lastEvent.ts > lastEventTs) {
-        lastEventTs = m.lastEvent.ts;
-        dispatchMissionEvent(m, mission, m.lastEvent);
-      } else if (typeof m.timeLeft === 'number' && m.timeLeft !== lastTimeLeft) {
+      const ev = m.lastEvent;
+      if (ev && typeof ev.seq === 'number') {
+        const key = m.missionId + ':' + ev.seq;
+        const isFreshStart = ev.kind === 'started';
+        if (key !== lastKey && (ev.seq > lastEventSeq || isFreshStart)) {
+          lastKey = key;
+          lastEventSeq = ev.seq;
+          dispatchMissionEvent(m, mission, ev);
+          lastTimeLeft = m.timeLeft;
+          return;
+        }
+      }
+      if (typeof m.timeLeft === 'number' && m.timeLeft !== lastTimeLeft) {
         emit('timer', { timeLeft: m.timeLeft });
       }
       lastTimeLeft = m.timeLeft;
@@ -191,7 +243,10 @@ const WS = (() => {
           puzzleIndex: m.puzzleIndex,
           totalPuzzles: m.totalPuzzles,
           timeLeft: m.timeLeft,
-          resources: m.resources
+          resources: m.resources,
+          attempts: 0, hintsUsed: 0,
+          missionHintsUsed: m.totalHints || 0,
+          missionHintsRemaining: missionHintsRemaining(mission, m.totalHints || 0)
         });
         break;
       case 'next':
@@ -200,18 +255,34 @@ const WS = (() => {
           puzzleIndex: m.puzzleIndex,
           totalPuzzles: m.totalPuzzles,
           module: mission.puzzles[m.puzzleIndex].module,
-          timeLeft: m.timeLeft
+          timeLeft: m.timeLeft,
+          attempts: 0, hintsUsed: 0,
+          missionHintsUsed: m.totalHints || 0,
+          missionHintsRemaining: missionHintsRemaining(mission, m.totalHints || 0)
         });
         break;
       case 'solved':
-        emit('puzzle:solved', { message: ev.message, puzzleIndex: ev.puzzleIndex, resources: m.resources, timeLeft: m.timeLeft });
+        emit('puzzle:solved', {
+          message: ev.message, puzzleIndex: ev.puzzleIndex, resources: m.resources, timeLeft: m.timeLeft,
+          attempts: Number.isFinite(ev.attempts) ? ev.attempts : null
+        });
         break;
       case 'failed':
-        emit('puzzle:failed', { message: ev.message, puzzleIndex: ev.puzzleIndex });
+        emit('puzzle:failed', {
+          message: ev.message, puzzleIndex: ev.puzzleIndex,
+          timePenalty: ev.timePenalty || 0, resourcePenalty: ev.resourcePenalty || null,
+          timeLeft: ev.timeLeft, resources: ev.resources,
+          attempts: Number.isFinite(ev.attempts) ? ev.attempts : null,
+          maxAttempts: Number.isFinite(ev.maxAttempts) ? ev.maxAttempts : null
+        });
         break;
       case 'hint':
         if (ev.forRole && ev.forRole !== role) return;
-        if (ev.text) emit('hint:response', { puzzleIndex: ev.puzzleIndex, text: ev.text, hintsRemaining: ev.hintsRemaining });
+        if (ev.text) emit('hint:response', {
+          puzzleIndex: ev.puzzleIndex, text: ev.text, hintsRemaining: ev.hintsRemaining, cost: ev.cost || null, timeLeft: ev.timeLeft, resources: ev.resources,
+          missionHintsUsed: Number.isFinite(ev.missionHintsUsed) ? ev.missionHintsUsed : null,
+          missionHintsRemaining: Number.isFinite(ev.missionHintsRemaining) ? ev.missionHintsRemaining : null
+        });
         else emit('hint:response', { puzzleIndex: ev.puzzleIndex, text: null, hintsRemaining: 0, message: ev.message });
         break;
     }
@@ -229,7 +300,7 @@ const WS = (() => {
       if (r.kind === 'complete') {
         emit('mission:complete', {
           missionId: r.missionId, stars: r.stars, timeLeft: r.timeLeft, debrief: r.debrief,
-          resourceReward: r.resourceReward, resources: r.resources, newlyUnlocked: r.newlyUnlocked, ending: r.ending
+          resourceReward: r.resourceReward, resources: r.resources, newlyUnlocked: r.newlyUnlocked, ending: r.ending, isReplay: !!r.isReplay
         });
       } else if (r.kind === 'gameover') {
         emit('game:over', { win: false, reason: r.reason, debrief: r.debrief, resources: r.resources });
@@ -263,6 +334,7 @@ const WS = (() => {
       case 'mission:start': return authorityMissionStart(payload.missionId, requesterRole, isLocal);
       case 'hub:return': return authorityHubReturn(requesterRole, isLocal);
       case 'campaign:reset': return authorityCampaignReset(requesterRole, isLocal);
+      case 'campaign:replay': return authorityCampaignReplay(requesterRole, isLocal);
       case 'campaign:restore': return authorityCampaignRestore(payload.campaign, requesterRole, isLocal);
       case 'puzzle:action': return authorityPuzzleAction(payload.action, requesterRole, isLocal);
       case 'hint:request': return authorityHintRequest(requesterRole, isLocal);
@@ -276,6 +348,13 @@ const WS = (() => {
     try { await roomRef('roomEvent').set({ type: 'error', message, ts: Date.now(), onlyRole: requesterRole }); } catch (e) { /* ignore */ }
   }
 
+  // ── Compteur monotone pour l'ordonnancement fiable de `lastEvent` (voir
+  // attachOperatorMissionListener) ──
+  function bumpEvent(kind, extra) {
+    techRuntime.eventSeq = (techRuntime.eventSeq || 0) + 1;
+    return { kind, ts: Date.now(), seq: techRuntime.eventSeq, ...(extra || {}) };
+  }
+
   // ── Persistance du runtime de mission (Technicien) ──
   async function persistMissionRuntime() {
     await roomRef('mission').set({
@@ -287,7 +366,11 @@ const WS = (() => {
       puzzleStates: techRuntime.puzzleStates,
       totalAttempts: techRuntime.totalAttempts,
       totalHints: techRuntime.totalHints,
+      totalTimePenalty: techRuntime.totalTimePenalty || 0,
       choiceLog: techRuntime.choiceLog,
+      isReplay: !!techRuntime.isReplay,
+      ngPlus: techRuntime.ngPlus || 0,
+      eventSeq: techRuntime.eventSeq || 0,
       lastEvent: techRuntime.lastEvent || null
     });
   }
@@ -325,22 +408,32 @@ const WS = (() => {
       const check = CampaignEngine.canStartMission(campaign, missionId);
       if (!check.ok) return authorityError(check.reason, requesterRole, isLocal);
 
-      techMissionDef = check.mission;
-      techRuntime = CampaignEngine.startMissionRuntime(check.mission);
+      // `techMissionDef` est la version « effective » de la mission : les
+      // leviers de difficulté (minuteur, tolérance, tentatives, coût des
+      // indices…) sont durcis selon `campaign.ngPlus` (voir
+      // CampaignEngine.getEffectiveMission). Les données envoyées à
+      // l'Opérateur/Technicien (texte, mapping, schéma…) restent identiques.
+      techMissionDef = CampaignEngine.getEffectiveMission(check.mission, campaign.ngPlus);
+      techRuntime = CampaignEngine.startMissionRuntime(techMissionDef, check.isReplay);
       techRuntime.resources = campaign.resources;
-      techRuntime.lastEvent = { kind: 'started', ts: Date.now() };
+      techRuntime.ngPlus = campaign.ngPlus || 0;
+      techRuntime.lastEvent = bumpEvent('started');
 
       await roomRef().update({ phase: 'mission' });
       await persistMissionRuntime();
       startTechnicianTimer();
 
       emit('mission:started', {
-        mission: missionSummary(check.mission),
-        puzzle: CampaignEngine.getPuzzleForRole(check.mission, 0, 'technician'),
+        mission: missionSummary(techMissionDef),
+        puzzle: CampaignEngine.getPuzzleForRole(techMissionDef, 0, 'technician'),
         puzzleIndex: 0,
-        totalPuzzles: check.mission.puzzles.length,
+        totalPuzzles: techMissionDef.puzzles.length,
         timeLeft: techRuntime.timeLeft,
-        resources: campaign.resources
+        resources: campaign.resources,
+        isReplay: check.isReplay,
+        attempts: 0, hintsUsed: 0,
+        missionHintsUsed: 0,
+        missionHintsRemaining: missionHintsRemaining(techMissionDef, 0)
       });
     } catch (e) {
       authorityError('Impossible de démarrer la mission.', requesterRole, isLocal);
@@ -375,6 +468,30 @@ const WS = (() => {
     } catch (e) { /* ignore */ }
   }
 
+  /**
+   * « REJOUER LA CAMPAGNE » / New Game+ — uniquement disponible depuis le Hub
+   * une fois la campagne terminée (`campaign.ending` défini). Contrairement à
+   * `campaign:reset` (remise à zéro totale, cycle 0, utilisée par le bouton de
+   * développement/débogage), `campaign:replay` incrémente `ngPlus` et conserve
+   * `bestStars` (record historique) — voir CampaignEngine.restartCampaign.
+   */
+  async function authorityCampaignReplay(requesterRole, isLocal) {
+    try {
+      const phaseSnap = await roomRef('phase').once('value');
+      if (phaseSnap.val() !== 'hub') return authorityError('Impossible de rejouer en pleine mission', requesterRole, isLocal);
+      const currentSnap = await roomRef('campaign').once('value');
+      const current = CampaignEngine.sanitizeCampaign(currentSnap.val());
+      if (!current.ending) return authorityError("La campagne n'est pas encore terminée", requesterRole, isLocal);
+      const campaign = CampaignEngine.restartCampaign(current);
+      await roomRef().update({
+        campaign,
+        roomEvent: { type: 'campaign:replayed', ts: Date.now(), onlyRole: null }
+      });
+      emit('campaign:replay', { ngPlus: campaign.ngPlus });
+      emitHubStateFromCampaign(campaign);
+    } catch (e) { /* ignore */ }
+  }
+
   async function authorityCampaignRestore(savedCampaign, requesterRole, isLocal) {
     try {
       const phaseSnap = await roomRef('phase').once('value');
@@ -397,15 +514,41 @@ const WS = (() => {
       const puzzleIndex = techRuntime.puzzleIndex;
       const puzzleState = techRuntime.puzzleStates[puzzleIndex];
       if (!puzzleState) return;
-      const hint = CampaignEngine.getHint(techMissionDef, puzzleIndex, puzzleState.hintsUsed);
+      const hint = CampaignEngine.getHint(techMissionDef, puzzleIndex, puzzleState.hintsUsed, techRuntime.totalHints);
       if (hint.text) {
         puzzleState.hintsUsed++;
         techRuntime.totalHints++;
-        techRuntime.lastEvent = { kind: 'hint', ts: Date.now(), puzzleIndex, text: hint.text, hintsRemaining: hint.hintsRemaining, forRole: null };
+        // Coût concret de l'indice : temps de mission et/ou ressources de
+        // campagne, en plus de la pénalité d'étoiles déjà induite par
+        // totalHints > 0 dans CampaignEngine.computeStars.
+        let resourcesAfterCost = techRuntime.resources;
+        if (hint.cost) {
+          if (Number.isFinite(hint.cost.time) && hint.cost.time > 0) {
+            techRuntime.timeLeft = Math.max(1, techRuntime.timeLeft - hint.cost.time);
+          }
+          if (hint.cost.resourceDelta) {
+            const campaignSnap = await roomRef('campaign').once('value');
+            const campaign = CampaignEngine.sanitizeCampaign(campaignSnap.val());
+            CampaignEngine.applyResourceDelta(campaign, hint.cost.resourceDelta);
+            await roomRef('campaign').set(campaign);
+            techRuntime.resources = campaign.resources;
+            resourcesAfterCost = campaign.resources;
+          }
+        }
+        techRuntime.lastEvent = bumpEvent('hint', {
+          puzzleIndex, text: hint.text, hintsRemaining: hint.hintsRemaining,
+          cost: hint.cost || null, timeLeft: techRuntime.timeLeft, resources: resourcesAfterCost, forRole: null,
+          missionHintsUsed: techRuntime.totalHints,
+          missionHintsRemaining: missionHintsRemaining(techMissionDef, techRuntime.totalHints)
+        });
         await persistMissionRuntime();
-        emit('hint:response', { puzzleIndex, text: hint.text, hintsRemaining: hint.hintsRemaining });
+        emit('hint:response', {
+          puzzleIndex, text: hint.text, hintsRemaining: hint.hintsRemaining, cost: hint.cost || null, timeLeft: techRuntime.timeLeft, resources: resourcesAfterCost,
+          missionHintsUsed: techRuntime.totalHints,
+          missionHintsRemaining: missionHintsRemaining(techMissionDef, techRuntime.totalHints)
+        });
       } else {
-        techRuntime.lastEvent = { kind: 'hint', ts: Date.now(), puzzleIndex, text: null, message: 'Aucun indice supplémentaire disponible.', forRole: requesterRole };
+        techRuntime.lastEvent = bumpEvent('hint', { puzzleIndex, text: null, message: 'Aucun indice supplémentaire disponible.', forRole: requesterRole });
         await persistMissionRuntime();
         if (isLocal) emit('hint:response', { puzzleIndex, text: null, hintsRemaining: 0, message: 'Aucun indice supplémentaire disponible.' });
       }
@@ -417,6 +560,7 @@ const WS = (() => {
     if (requesterRole !== 'operator') return authorityError("Seul l'Opérateur peut agir sur ce panneau", requesterRole, isLocal);
 
     const puzzleIndex = techRuntime.puzzleIndex;
+    const puzzle = techMissionDef.puzzles[puzzleIndex];
     const puzzleState = techRuntime.puzzleStates[puzzleIndex];
     if (!puzzleState || puzzleState.solved) return;
 
@@ -430,18 +574,23 @@ const WS = (() => {
         const campaignSnap = await roomRef('campaign').once('value');
         const campaign = CampaignEngine.sanitizeCampaign(campaignSnap.val());
         if (result.consequence) {
-          CampaignEngine.applyConsequence(campaign, result.consequence);
+          // Rejeu de mission : la conséquence narrative (ressources/flags) ne
+          // doit s'appliquer qu'à la toute première réussite — voir la règle
+          // documentée sur CampaignEngine.canStartMission/completeMission.
+          // Le timeDelta, lui, reste un simple ajustement du minuteur de
+          // CETTE exécution de mission : il s'applique toujours.
+          if (!techRuntime.isReplay) CampaignEngine.applyConsequence(campaign, result.consequence);
           if (typeof result.consequence.timeDelta === 'number') {
             techRuntime.timeLeft = Math.max(1, techRuntime.timeLeft + result.consequence.timeDelta);
           }
-          techRuntime.choiceLog[techMissionDef.puzzles[puzzleIndex].id] = result.chosenOptionId;
+          techRuntime.choiceLog[puzzle.id] = result.chosenOptionId;
         }
         await roomRef('campaign').set(campaign);
         techRuntime.resources = campaign.resources;
-        techRuntime.lastEvent = { kind: 'solved', ts: Date.now(), puzzleIndex, message: result.message };
+        techRuntime.lastEvent = bumpEvent('solved', { puzzleIndex, message: result.message, attempts: puzzleState.attempts });
         await persistMissionRuntime();
 
-        emit('puzzle:solved', { message: result.message, puzzleIndex, resources: campaign.resources, timeLeft: techRuntime.timeLeft });
+        emit('puzzle:solved', { message: result.message, puzzleIndex, resources: campaign.resources, timeLeft: techRuntime.timeLeft, attempts: puzzleState.attempts });
 
         const missionIdAtSolve = techMissionDef.id;
         setTimeout(async () => {
@@ -451,26 +600,74 @@ const WS = (() => {
             await finishMission(true);
           } else {
             techRuntime.puzzleIndex = next;
-            techRuntime.lastEvent = { kind: 'next', ts: Date.now(), puzzleIndex: next };
+            techRuntime.lastEvent = bumpEvent('next', { puzzleIndex: next });
             await persistMissionRuntime();
             emit('puzzle:next', {
               puzzle: CampaignEngine.getPuzzleForRole(techMissionDef, next, 'technician'),
               puzzleIndex: next,
               totalPuzzles: techMissionDef.puzzles.length,
               module: techMissionDef.puzzles[next].module,
-              timeLeft: techRuntime.timeLeft
+              timeLeft: techRuntime.timeLeft,
+              attempts: 0, hintsUsed: 0,
+              missionHintsUsed: techRuntime.totalHints,
+              missionHintsRemaining: missionHintsRemaining(techMissionDef, techRuntime.totalHints)
             });
           }
         }, 2500);
       } else {
-        techRuntime.lastEvent = { kind: 'failed', ts: Date.now(), puzzleIndex, message: result.message };
+        // ── Pénalité de tentative erronée (temps et/ou ressources) ──
+        // Configurable par puzzle dans missions-data.js (`attemptTimePenalty`,
+        // `attemptResourcePenalty`), durcie par New Game+ (voir
+        // CampaignEngine.getEffectiveMission). Surfacée aux DEUX joueurs via
+        // `puzzle:failed`.
+        let timePenalty = 0;
+        let resourcePenalty = null;
+        let resourcesAfterPenalty = techRuntime.resources;
+        if (Number.isFinite(puzzle.attemptTimePenalty) && puzzle.attemptTimePenalty > 0) {
+          timePenalty = puzzle.attemptTimePenalty;
+          techRuntime.timeLeft = Math.max(1, techRuntime.timeLeft - timePenalty);
+        }
+        if (puzzle.attemptResourcePenalty) {
+          const campaignSnap = await roomRef('campaign').once('value');
+          const campaign = CampaignEngine.sanitizeCampaign(campaignSnap.val());
+          CampaignEngine.applyResourceDelta(campaign, puzzle.attemptResourcePenalty);
+          await roomRef('campaign').set(campaign);
+          techRuntime.resources = campaign.resources;
+          resourcesAfterPenalty = campaign.resources;
+          resourcePenalty = puzzle.attemptResourcePenalty;
+        }
+
+        // ── Nombre de tentatives maximal dépassé : échec immédiat de la mission ──
+        if (Number.isFinite(puzzle.maxAttempts) && puzzleState.attempts >= puzzle.maxAttempts) {
+          techRuntime.lastEvent = bumpEvent('failed', {
+            puzzleIndex, message: result.message,
+            timePenalty, resourcePenalty, timeLeft: techRuntime.timeLeft, resources: resourcesAfterPenalty,
+            attempts: puzzleState.attempts, maxAttempts: puzzle.maxAttempts
+          });
+          await persistMissionRuntime();
+          emit('puzzle:failed', {
+            message: result.message, puzzleIndex, timePenalty, resourcePenalty, timeLeft: techRuntime.timeLeft, resources: resourcesAfterPenalty,
+            attempts: puzzleState.attempts, maxAttempts: puzzle.maxAttempts
+          });
+          await finishMission(false, 'TROP DE TENTATIVES SUR CE MODULE');
+          return;
+        }
+
+        techRuntime.lastEvent = bumpEvent('failed', {
+          puzzleIndex, message: result.message,
+          timePenalty, resourcePenalty, timeLeft: techRuntime.timeLeft, resources: resourcesAfterPenalty,
+          attempts: puzzleState.attempts, maxAttempts: Number.isFinite(puzzle.maxAttempts) ? puzzle.maxAttempts : null
+        });
         await persistMissionRuntime();
-        emit('puzzle:failed', { message: result.message, puzzleIndex });
+        emit('puzzle:failed', {
+          message: result.message, puzzleIndex, timePenalty, resourcePenalty, timeLeft: techRuntime.timeLeft, resources: resourcesAfterPenalty,
+          attempts: puzzleState.attempts, maxAttempts: Number.isFinite(puzzle.maxAttempts) ? puzzle.maxAttempts : null
+        });
       }
     } catch (e) { /* ignore */ }
   }
 
-  async function finishMission(win) {
+  async function finishMission(win, failReason) {
     stopTechnicianTimer();
     const mission = techMissionDef;
     if (!mission) return;
@@ -480,17 +677,17 @@ const WS = (() => {
       const { result, newlyUnlocked, ending } = CampaignEngine.completeMission(campaign, mission, techRuntime, win);
 
       const resultNode = win
-        ? { kind: 'complete', missionId: mission.id, stars: result.stars, timeLeft: result.timeLeft, debrief: mission.debrief.success, resourceReward: mission.resourceReward, resources: campaign.resources, newlyUnlocked, ending, ts: Date.now() }
-        : { kind: 'gameover', missionId: mission.id, reason: 'TEMPS ÉCOULÉ', debrief: mission.debrief.fail, resources: campaign.resources, ts: Date.now() };
+        ? { kind: 'complete', missionId: mission.id, stars: result.stars, timeLeft: result.timeLeft, debrief: mission.debrief.success, resourceReward: mission.resourceReward, resources: campaign.resources, newlyUnlocked, ending, isReplay: result.isReplay, ts: Date.now() }
+        : { kind: 'gameover', missionId: mission.id, reason: failReason || 'TEMPS ÉCOULÉ', debrief: mission.debrief.fail, resources: campaign.resources, ts: Date.now() };
 
       await roomRef().update({ phase: 'hub', mission: null, campaign, result: resultNode });
 
       techRuntime = null; techMissionDef = null;
 
       if (win) {
-        emit('mission:complete', { missionId: mission.id, stars: result.stars, timeLeft: result.timeLeft, debrief: mission.debrief.success, resourceReward: mission.resourceReward, resources: campaign.resources, newlyUnlocked, ending });
+        emit('mission:complete', { missionId: mission.id, stars: result.stars, timeLeft: result.timeLeft, debrief: mission.debrief.success, resourceReward: mission.resourceReward, resources: campaign.resources, newlyUnlocked, ending, isReplay: result.isReplay });
       } else {
-        emit('game:over', { win: false, reason: 'TEMPS ÉCOULÉ', debrief: mission.debrief.fail, resources: campaign.resources });
+        emit('game:over', { win: false, reason: failReason || 'TEMPS ÉCOULÉ', debrief: mission.debrief.fail, resources: campaign.resources });
       }
     } catch (e) { /* ignore */ }
   }
@@ -574,7 +771,13 @@ const WS = (() => {
 
       if (phase === 'mission' && missionNode) {
         if (role === 'technician') {
-          techMissionDef = CampaignEngine.findMission(missionNode.missionId);
+          // Recalcule la version « effective » (NG+) de la mission à partir du
+          // cycle enregistré au démarrage de CETTE exécution (`missionNode.ngPlus`),
+          // pas du cycle courant de la campagne — ils coïncident toujours en
+          // pratique (campaign:replay n'est permis qu'en phase 'hub'), mais on
+          // reste défensif en cas d'état RTDB partiellement écrit.
+          const rawMission = CampaignEngine.findMission(missionNode.missionId);
+          techMissionDef = CampaignEngine.getEffectiveMission(rawMission, missionNode.ngPlus || 0);
           techRuntime = {
             puzzleIndex: missionNode.puzzleIndex,
             timeLeft: missionNode.timeLeft,
@@ -582,17 +785,22 @@ const WS = (() => {
             puzzleStates: missionNode.puzzleStates || [],
             totalAttempts: missionNode.totalAttempts || 0,
             totalHints: missionNode.totalHints || 0,
+            totalTimePenalty: missionNode.totalTimePenalty || 0,
             choiceLog: missionNode.choiceLog || {},
+            isReplay: !!missionNode.isReplay,
+            ngPlus: missionNode.ngPlus || 0,
+            eventSeq: missionNode.eventSeq || 0,
             lastEvent: missionNode.lastEvent || null
           };
           attachRequestsListener();
           startTechnicianTimer();
         } else {
-          attachOperatorMissionListener((missionNode.lastEvent && missionNode.lastEvent.ts) || 0, missionNode.timeLeft);
+          attachOperatorMissionListener((missionNode.lastEvent && missionNode.lastEvent.seq) || 0, missionNode.timeLeft);
         }
         attachResultListener();
 
-        const mission = techMissionDef || CampaignEngine.findMission(missionNode.missionId);
+        const mission = techMissionDef || CampaignEngine.getEffectiveMission(CampaignEngine.findMission(missionNode.missionId), missionNode.ngPlus || 0);
+        const resumePuzzleState = (missionNode.puzzleStates || [])[missionNode.puzzleIndex] || null;
         emit('mission:resume', {
           code, role,
           mission: missionSummary(mission),
@@ -600,7 +808,11 @@ const WS = (() => {
           puzzleIndex: missionNode.puzzleIndex,
           totalPuzzles: missionNode.totalPuzzles,
           timeLeft: missionNode.timeLeft,
-          resources: missionNode.resources
+          resources: missionNode.resources,
+          attempts: resumePuzzleState ? (resumePuzzleState.attempts || 0) : 0,
+          hintsUsed: resumePuzzleState ? (resumePuzzleState.hintsUsed || 0) : 0,
+          missionHintsUsed: missionNode.totalHints || 0,
+          missionHintsRemaining: missionHintsRemaining(mission, missionNode.totalHints || 0)
         });
       } else {
         if (role === 'technician') attachRequestsListener();
@@ -656,6 +868,11 @@ const WS = (() => {
         return role === 'technician'
           ? processAuthorityRequest('campaign:reset', {}, 'technician', true)
           : enqueueRequest('campaign:reset', {});
+
+      case 'campaign:replay':
+        return role === 'technician'
+          ? processAuthorityRequest('campaign:replay', {}, 'technician', true)
+          : enqueueRequest('campaign:replay', {});
 
       case 'campaign:restore':
         // Toujours envoyé par le Technicien (hub.js ne l'envoie que si role === 'technician').

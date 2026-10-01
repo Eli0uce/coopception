@@ -31,6 +31,7 @@
       <div class="subtitle">BASE DE COMMANDEMENT — SECTEUR ALPHA</div>
     </div>
     <div class="hub-meta">
+      <button class="help-btn" data-onboarding-trigger>❓ AIDE</button>
       <div class="meta-badge" id="meta-role">—</div>
       <div class="meta-badge" id="meta-room">ROOM : —</div>
     </div>
@@ -42,14 +43,30 @@
     <div id="ending-banner" class="ending-banner" style="display:none;">
       <div class="ending-title" id="ending-title"></div>
       <div class="ending-text" id="ending-text"></div>
+      <div class="ending-summary" id="ending-summary"></div>
+      <div class="ending-actions">
+        <button class="lobby-link" id="btn-replay" style="display:none;">⟳ REJOUER LA CAMPAGNE (NEW GAME+)</button>
+      </div>
     </div>
 
-    <div class="section-title">ÉTAT DE LA CAMPAGNE</div>
+    <div class="section-title">ÉTAT DE LA CAMPAGNE <span id="ngplus-badge" style="display:none;"></span></div>
     <div class="resource-panel" id="resource-panel">
       <!-- Généré par hub.js -->
     </div>
 
-    <div class="section-title">MISSIONS DISPONIBLES</div>
+    <div class="section-title">PROGRESSION DE LA CAMPAGNE</div>
+    <div class="mission-graph-wrap" id="mission-graph-wrap">
+      <svg class="graph-links" id="graph-links"></svg>
+      <div class="mission-graph" id="mission-graph"></div>
+    </div>
+
+    <div class="section-title">MISSIONS</div>
+    <div class="mission-filters" id="mission-filters">
+      <button class="filter-btn active" data-filter="all">TOUTES</button>
+      <button class="filter-btn" data-filter="available">DISPONIBLES</button>
+      <button class="filter-btn" data-filter="done">TERMINÉES</button>
+      <button class="filter-btn" data-filter="locked">VERROUILLÉES</button>
+    </div>
     <div class="mission-list" id="mission-list">
       <div class="hub-loading">◌ CONNEXION AU RÉSEAU DE LA STATION…</div>
     </div>
@@ -66,6 +83,34 @@
 
 </div>
 
+<!-- ── Onboarding : COMMENT JOUER ── -->
+<div id="onboarding-overlay" class="onboarding-overlay" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+  <div class="onboarding-card">
+    <button class="onboarding-close" id="onboarding-close" aria-label="Fermer">✕</button>
+    <h2 id="onboarding-title">📖 COMMENT JOUER</h2>
+    <div class="onboarding-roles">
+      <div class="onboarding-role tech">
+        <div class="role-icon">🖥</div>
+        <div class="role-name">TECHNICIEN</div>
+        <div class="role-desc">Lit les manuels numériques, les schémas et les indices. Voit les solutions mais ne peut rien actionner directement.</div>
+      </div>
+      <div class="onboarding-role oper">
+        <div class="role-icon">⚙</div>
+        <div class="role-name">OPÉRATEUR</div>
+        <div class="role-desc">Manipule les panneaux physiques (boutons, curseurs, leviers). Voit les commandes mais pas les instructions.</div>
+      </div>
+    </div>
+    <ul class="onboarding-tips">
+      <li>🗣 <strong>Parlez-vous en permanence</strong> — via le tchat intégré ou à voix haute. Le Technicien dicte, l'Opérateur exécute.</li>
+      <li>⏱ Chaque mission a un <strong>temps limite</strong> et des <strong>ressources</strong> de campagne (intégrité, confiance, renseignement) à préserver.</li>
+      <li>❌ Une tentative ratée peut coûter du <strong>temps</strong> ou des <strong>ressources</strong> — vérifiez ensemble avant de valider.</li>
+      <li>💡 Les <strong>indices</strong> ont un coût concret et sont limités par mission — demandez-les avec parcimonie.</li>
+      <li>★ Un <strong>score d'étoiles</strong> récompense les runs propres. Vous pouvez toujours rejouer une mission terminée pour l'améliorer.</li>
+    </ul>
+    <button class="btn primary" id="onboarding-start">COMPRIS, C'EST PARTI</button>
+  </div>
+</div>
+
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
@@ -75,6 +120,7 @@
 <script src="js/missions-data.js"></script>
 <script src="js/campaign-engine.js"></script>
 <script src="js/rtdb-client.js"></script>
+<script src="js/onboarding.js"></script>
 <script src="js/hub.js"></script>
 <!-- Scène Three.js chargée en module (après le DOM) -->
 <script type="module" src="js/hub-scene.js"></script>

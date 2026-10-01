@@ -197,8 +197,66 @@ input:focus { border-color: var(--green); box-shadow: var(--glow); }
   letter-spacing: 4px;
 }
 #timer-display.warning { color: var(--amber); text-shadow: var(--glow-amber); animation: pulse 0.5s ease infinite alternate; }
-#timer-display.danger  { color: var(--red);  text-shadow: 0 0 8px var(--red); animation: pulse 0.3s ease infinite alternate; }
+#timer-display.danger  { color: var(--red);  text-shadow: 0 0 8px var(--red), 0 0 20px var(--red); animation: pulse 0.3s ease infinite alternate, dangerShake 0.4s ease infinite; }
 @keyframes pulse { from { opacity: 1; } to { opacity: 0.5; } }
+@keyframes dangerShake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-2px); }
+  75% { transform: translateX(2px); }
+}
+
+/* ── Barre d'objectif (mission / puzzle N-sur-total / tentatives / indices) ── */
+.objective-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  padding: 8px 20px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.25);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+.objective-bar .obj-item { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.objective-bar .obj-label { font-size: 10px; letter-spacing: 2px; color: var(--green-dim); }
+.objective-bar #obj-attempts, .objective-bar #obj-hints, .objective-bar #obj-mission-title, .objective-bar #obj-puzzle-progress {
+  color: var(--green);
+  font-family: 'VT323', monospace;
+  font-size: 16px;
+}
+.objective-bar .obj-item.attempts-warning #obj-attempts { color: var(--amber); }
+.objective-bar .obj-item.attempts-danger #obj-attempts { color: var(--red); }
+
+/* Flash "perte" (pénalité de tentative/indice) — doit être impossible à manquer */
+@keyframes penaltyFlash {
+  0%   { box-shadow: inset 0 0 0 3px rgba(255,51,51,0); }
+  20%  { box-shadow: inset 0 0 40px 6px rgba(255,51,51,0.55); }
+  100% { box-shadow: inset 0 0 0 3px rgba(255,51,51,0); }
+}
+.penalty-flash::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 9600;
+  animation: penaltyFlash 0.6s ease-out;
+}
+@keyframes attemptsPulse {
+  0%, 100% { transform: scale(1); }
+  30% { transform: scale(1.25); }
+}
+.obj-item.just-penalized #obj-attempts { animation: attemptsPulse 0.5s ease; color: var(--red) !important; }
+
+/* Instructions d'affordance pour les panneaux de puzzle */
+.affordance-hint {
+  font-size: 11px;
+  letter-spacing: 1px;
+  line-height: 1.6;
+  color: var(--amber-dim);
+  padding: 8px 12px;
+  border: 1px dashed var(--border);
+  background: rgba(255,176,0,0.04);
+  margin-bottom: 14px;
+}
 
 /* Notification */
 .notif {
@@ -333,5 +391,120 @@ input:focus { border-color: var(--green); box-shadow: var(--glow); }
   background: var(--amber);
   color: var(--bg);
   box-shadow: var(--glow-amber), 0 0 40px #ffb000;
+}
+
+/* ══════════════════════════════════════════
+   Onboarding — "COMMENT JOUER" (modal partagée lobby + hub)
+   ══════════════════════════════════════════ */
+.help-btn {
+  background: transparent;
+  border: 1px solid var(--green-dim);
+  color: var(--green-dim);
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 2px;
+  padding: 6px 14px;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.help-btn:hover, .help-btn:focus-visible { border-color: var(--green); color: var(--green); box-shadow: var(--glow); }
+
+.onboarding-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.88);
+  z-index: 9700;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  overflow-y: auto;
+}
+.onboarding-overlay.visible { display: flex; }
+.onboarding-card {
+  position: relative;
+  max-width: 640px;
+  width: 100%;
+  max-height: 88vh;
+  overflow-y: auto;
+  border: 2px solid var(--green);
+  background: var(--panel);
+  box-shadow: var(--glow);
+  padding: 36px 40px;
+}
+.onboarding-card h2 {
+  font-size: 32px;
+  color: var(--green);
+  text-shadow: var(--glow);
+  letter-spacing: 2px;
+  margin-bottom: 20px;
+  text-align: center;
+}
+.onboarding-close {
+  position: absolute;
+  top: 14px; right: 14px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--green-dim);
+  width: 32px; height: 32px;
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  transition: all 0.2s;
+}
+.onboarding-close:hover, .onboarding-close:focus-visible { border-color: var(--red); color: var(--red); }
+.onboarding-roles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+.onboarding-role {
+  border: 1px solid var(--border);
+  padding: 16px;
+  text-align: center;
+  background: rgba(0,255,65,0.03);
+}
+.onboarding-role.oper { border-color: rgba(255,176,0,0.35); background: rgba(255,176,0,0.04); }
+.onboarding-role .role-icon { font-size: 32px; margin-bottom: 6px; }
+.onboarding-role .role-name {
+  font-family: 'VT323', monospace;
+  font-size: 20px;
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+}
+.onboarding-role.tech .role-name { color: var(--green); text-shadow: var(--glow); }
+.onboarding-role.oper .role-name { color: var(--amber); text-shadow: var(--glow-amber); }
+.onboarding-role .role-desc { font-size: 12px; line-height: 1.6; color: var(--green-dim); }
+.onboarding-role.oper .role-desc { color: var(--amber-dim); }
+.onboarding-tips {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 28px;
+}
+.onboarding-tips li {
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--green-dim);
+  padding: 10px 14px;
+  border-left: 2px solid var(--border);
+  background: rgba(0,255,65,0.02);
+}
+.onboarding-tips li strong { color: var(--green); }
+#onboarding-start { width: 100%; }
+
+@media (max-width: 640px) {
+  .onboarding-roles { grid-template-columns: 1fr; }
+  .onboarding-card { padding: 28px 20px; }
+}
+
+/* :focus-visible — navigation clavier lisible partout */
+button:focus-visible, .btn:focus-visible, .cta-btn:focus-visible,
+input:focus-visible, .tab:focus-visible, [tabindex]:focus-visible {
+  outline: 2px solid var(--amber);
+  outline-offset: 2px;
 }
 

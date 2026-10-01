@@ -306,6 +306,28 @@ input[type="range"]:focus { box-shadow: var(--glow-amber); }
   font-size: 12px;
 }
 
+/* Grille de déduction logique (logic_grid) */
+.logic-grid-head {
+  color: var(--amber-dim);
+  font-size: 11px;
+  letter-spacing: 1px;
+  text-align: center;
+  padding: 6px 4px;
+  align-self: center;
+}
+.logic-grid-cell {
+  background: #1a0f00;
+  border: 2px solid var(--amber-dim);
+  color: var(--amber-dim);
+  font-size: 18px;
+  padding: 10px 4px;
+  cursor: pointer;
+  transition: all 0.15s;
+  min-width: 44px;
+}
+.logic-grid-cell:hover { border-color: var(--amber); box-shadow: var(--glow-amber); }
+.logic-grid-cell.checked { background: var(--amber); color: #000; box-shadow: var(--glow-amber); }
+
 /* Décision (choice) — console opérateur */
 .choice-btn-group { display: flex; flex-direction: column; gap: 12px; margin-top: 10px; }
 .choice-btn {
@@ -323,3 +345,44 @@ input[type="range"]:focus { box-shadow: var(--glow-amber); }
 .choice-btn:hover { border-color: var(--amber); box-shadow: var(--glow-amber); }
 .choice-btn.chosen { background: var(--amber); color: #000; box-shadow: var(--glow-amber); }
 
+
+/* ── Barre d'objectif (thème ambre) ── */
+.oper-layout .objective-bar { border-color: rgba(255,176,0,0.25); background: rgba(20,12,0,0.4); }
+.oper-layout .objective-bar .obj-label { color: var(--amber-dim); }
+.oper-layout .objective-bar #obj-attempts,
+.oper-layout .objective-bar #obj-hints,
+.oper-layout .objective-bar #obj-mission-title,
+.oper-layout .objective-bar #obj-puzzle-progress { color: var(--amber); }
+
+/* ── Affordance : prochain nœud valide en surbrillance (valve_routing) ── */
+.wire-btn { position: relative; }
+.wire-btn.valid-next { border-color: var(--green); box-shadow: 0 0 10px rgba(0,255,65,0.45); }
+.wire-btn.valid-next::after { content: '●'; position: absolute; top: -6px; right: -6px; font-size: 9px; color: var(--green); }
+
+/* ── Parity : état ON/OFF explicite sous chaque commutateur ── */
+.switch-btn .switch-state { display: block; font-size: 10px; letter-spacing: 2px; margin-top: 4px; opacity: 0.75; }
+
+/* ── Boutons désactivés (budget d'indices épuisé, tentatives limitées…) ── */
+.btn:disabled, .validate-btn:disabled, .cta-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  filter: grayscale(0.4);
+}
+.btn:disabled:hover, .validate-btn:disabled:hover { background: inherit; color: inherit; box-shadow: none; }
+
+/* ── Boîtier/commutateurs/leviers déjà validés (committed) ── */
+.switch-btn[aria-pressed="true"], .lever-btn.active { box-shadow: 0 0 12px currentColor; }
+
+/* ── Responsive : pas de scroll horizontal à 1440/1280/1024/768 ── */
+@media (max-width: 1024px) {
+  .oper-layout { max-width: 100%; padding: 12px; gap: 12px; }
+  .oper-header { flex-wrap: wrap; gap: 8px; }
+  .wire-panel-grid { gap: 20px; }
+}
+@media (max-width: 768px) {
+  .oper-main { grid-template-columns: 1fr; }
+  .objective-bar { font-size: 11px; gap: 6px 14px; }
+  .numpad-grid { max-width: 100%; }
+  .wire-panel-grid { flex-wrap: wrap; justify-content: space-around; }
+  #timer-display { font-size: 36px; }
+}

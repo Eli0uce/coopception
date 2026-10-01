@@ -31,13 +31,45 @@
     .auth-actions { display:flex; gap:8px; margin-top:12px; }
     .auth-actions .btn { flex:1; }
     #auth-status { min-height:18px; margin-top:10px; font-size:12px; }
+
+    /* ── Statut de connexion Firebase/RTDB ── */
+    .conn-status {
+      position: fixed; top: 14px; right: 16px; z-index: 50;
+      font-size: 11px; letter-spacing: 2px; padding: 6px 12px;
+      border: 1px solid var(--border); background: rgba(0,10,0,.75);
+      color: var(--green-dim); display:flex; align-items:center; gap:7px;
+    }
+    .conn-status .dot { width:8px; height:8px; border-radius:50%; background: var(--green-dim); flex-shrink:0; }
+    .conn-status.online { color: var(--green); border-color: var(--green); }
+    .conn-status.online .dot { background: var(--green); box-shadow: var(--glow); }
+    .conn-status.offline { color: var(--red); border-color: var(--red); }
+    .conn-status.offline .dot { background: var(--red); box-shadow: 0 0 6px var(--red); animation: blink 1s step-end infinite; }
+    .conn-status.pending .dot { animation: blink 1s step-end infinite; }
+
+    .top-actions { display:flex; justify-content:flex-end; margin-bottom:10px; }
+
+    /* ── Code de room : gros, copiable ── */
+    .room-code-row { display:flex; align-items:center; justify-content:center; gap:14px; margin:20px 0; }
+    .room-code-display { flex:1; font-family:'VT323',monospace; font-size:64px; letter-spacing:12px; color:var(--green); text-shadow:var(--glow); text-align:center; padding:20px; border:1px solid var(--green); background:var(--green-dark); }
+    .copy-btn {
+      flex-shrink:0; align-self:stretch; background:var(--green-dark); border:1px solid var(--green); color:var(--green);
+      font-family:'Share Tech Mono',monospace; font-size:12px; letter-spacing:1px; padding:0 18px; cursor:pointer; transition:all .2s;
+    }
+    .copy-btn:hover, .copy-btn:focus-visible { background:var(--green); color:var(--bg); box-shadow:var(--glow); }
+    .copy-btn.copied { background:var(--green); color:var(--bg); }
+    .state-line { font-size:12px; letter-spacing:2px; color:var(--green-dim); margin:10px 0; min-height:18px; }
+    .state-line.active-state { color: var(--amber); }
   </style>
 </head>
 <body>
   <div class="scanline"></div>
+  <div id="conn-status" class="conn-status pending"><span class="dot"></span><span id="conn-status-text">CONNEXION…</span></div>
   <div class="lobby-wrap">
     <div class="logo">STATION<br>ZÉRO</div>
     <div class="subtitle">PROTOCOLE DE SURVIE COOPÉRATIF — 2 JOUEURS</div>
+    <div class="top-actions">
+      <button class="help-btn" data-onboarding-trigger>❓ COMMENT JOUER</button>
+    </div>
 
     <div class="auth-panel">
       <h2>IDENTIFICATION ÉQUIPAGE</h2>
@@ -61,16 +93,20 @@
     <div id="tab-create" class="tab-content active">
       <div class="form-wrap">
         <div id="create-init">
-          <p class="hint">Vous serez le <strong>TECHNICIEN</strong>.<br>Partagez le code à votre coéquipier Opérateur.</p>
+          <p class="hint">Vous serez le <strong>TECHNICIEN</strong>.<br>Vous lirez les manuels numériques et guiderez l'Opérateur.</p>
           <br>
-          <button class="btn primary" onclick="createRoom()" style="width:100%">⚡ CRÉER LA ROOM</button>
+          <button class="btn primary" id="btn-create-room" onclick="createRoom()" style="width:100%">⚡ CRÉER LA ROOM</button>
+          <div class="state-line" id="create-state-line"></div>
         </div>
         <div id="create-waiting" style="display:none">
-          <p style="font-size:12px;letter-spacing:2px;color:var(--green-dim)">CODE DE LA ROOM</p>
-          <div class="room-code-display" id="room-code-text">----</div>
+          <p style="font-size:12px;letter-spacing:2px;color:var(--green-dim)">CODE DE LA ROOM — PARTAGEZ-LE</p>
+          <div class="room-code-row">
+            <div class="room-code-display" id="room-code-text">----</div>
+            <button class="copy-btn" id="btn-copy-code" title="Copier le code">⧉ COPIER</button>
+          </div>
           <div class="role-badge tech">RÔLE : TECHNICIEN</div>
           <br>
-          <p class="waiting blink">⏳ En attente de l'Opérateur...</p>
+          <p class="waiting blink" id="waiting-text">⏳ En attente de l'Opérateur...</p>
           <p class="hint">Donnez ce code à votre coéquipier pour qu'il puisse rejoindre la partie.</p>
         </div>
       </div>
@@ -85,10 +121,39 @@
         </div>
         <div class="role-badge oper">RÔLE : OPÉRATEUR</div>
         <br>
-        <button class="btn primary" onclick="joinRoom()" style="width:100%">🔗 REJOINDRE</button>
+        <button class="btn primary" id="btn-join-room" onclick="joinRoom()" style="width:100%">🔗 REJOINDRE</button>
+        <div class="state-line" id="join-state-line"></div>
         <div id="error-msg"></div>
         <p class="hint">Entrez le code fourni par le Technicien.<br>Vous jouerez le rôle de l'Opérateur.</p>
       </div>
+    </div>
+  </div>
+
+  <!-- ── Onboarding : COMMENT JOUER ── -->
+  <div id="onboarding-overlay" class="onboarding-overlay" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+    <div class="onboarding-card">
+      <button class="onboarding-close" id="onboarding-close" aria-label="Fermer">✕</button>
+      <h2 id="onboarding-title">📖 COMMENT JOUER</h2>
+      <div class="onboarding-roles">
+        <div class="onboarding-role tech">
+          <div class="role-icon">🖥</div>
+          <div class="role-name">TECHNICIEN</div>
+          <div class="role-desc">Lit les manuels numériques, les schémas et les indices. Voit les solutions mais ne peut rien actionner directement.</div>
+        </div>
+        <div class="onboarding-role oper">
+          <div class="role-icon">⚙</div>
+          <div class="role-name">OPÉRATEUR</div>
+          <div class="role-desc">Manipule les panneaux physiques (boutons, curseurs, leviers). Voit les commandes mais pas les instructions.</div>
+        </div>
+      </div>
+      <ul class="onboarding-tips">
+        <li>🗣 <strong>Parlez-vous en permanence</strong> — via le tchat intégré ou à voix haute. Le Technicien dicte, l'Opérateur exécute.</li>
+        <li>⏱ Chaque mission a un <strong>temps limite</strong> et des <strong>ressources</strong> de campagne (intégrité, confiance, renseignement) à préserver.</li>
+        <li>❌ Une tentative ratée peut coûter du <strong>temps</strong> ou des <strong>ressources</strong> — vérifiez ensemble avant de valider.</li>
+        <li>💡 Les <strong>indices</strong> ont un coût concret et sont limités par mission — demandez-les avec parcimonie.</li>
+        <li>★ Un <strong>score d'étoiles</strong> récompense les runs propres. Vous pouvez toujours rejouer une mission terminée pour l'améliorer.</li>
+      </ul>
+      <button class="btn primary" id="onboarding-start">COMPRIS, C'EST PARTI</button>
     </div>
   </div>
 
@@ -101,6 +166,7 @@
   <script src="js/missions-data.js"></script>
   <script src="js/campaign-engine.js"></script>
   <script src="js/rtdb-client.js"></script>
+  <script src="js/onboarding.js"></script>
   <script src="js/lobby.js"></script>
 </body>
 </html>
