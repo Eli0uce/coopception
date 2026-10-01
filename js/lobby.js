@@ -27,21 +27,16 @@ StationAuth.init().then(user => {
   if (user) {
     document.getElementById('auth-form').style.display = 'none';
     document.getElementById('auth-user').style.display = 'block';
-    document.getElementById('auth-email-label').textContent = `CONNECTÉ : ${user.email}`;
+    document.getElementById('auth-email-label').textContent = `CONNECTÉ : ${user.displayName || user.email}`;
   }
 }).catch(error => setAuthStatus(StationAuth.errorMessage(error), true));
 
 document.getElementById('auth-login').addEventListener('click', async () => {
+  setAuthStatus('Ouverture de la fenêtre Google…');
   try {
-    await StationAuth.signIn(document.getElementById('auth-email').value.trim(), document.getElementById('auth-password').value);
-    location.reload();
-  } catch (error) { setAuthStatus(StationAuth.errorMessage(error), true); }
-});
-
-document.getElementById('auth-register').addEventListener('click', async () => {
-  try {
-    await StationAuth.signUp(document.getElementById('auth-email').value.trim(), document.getElementById('auth-password').value);
-    location.reload();
+    const result = await StationAuth.signInWithGoogle();
+    // null = bascule en redirection, la page va se recharger d'elle-même
+    if (result) location.reload();
   } catch (error) { setAuthStatus(StationAuth.errorMessage(error), true); }
 });
 

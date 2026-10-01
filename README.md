@@ -103,10 +103,15 @@ authentifié (voir règles plus bas).
 Le jeu utilise **trois produits Firebase**, déjà référencés dans
 `js/firebase-config.js` :
 
-1. **Authentication → Sign-in method → Email/Password** — activez-le. La
-   connexion par email/mot de passe est **obligatoire** pour créer ou
-   rejoindre une room (gérée par `js/firebase-auth.js`, module
-   `StationAuth`).
+1. **Authentication → Sign-in method → Google** — activez-le et
+   renseignez l'email d'assistance du projet. La connexion Google est
+   **obligatoire** pour créer ou rejoindre une room (gérée par
+   `js/firebase-auth.js`, module `StationAuth`).
+
+   Pensez aussi à **Authentication → Settings → Authorized domains** :
+   ajoutez-y votre domaine GitHub Pages (`VOTRE-COMPTE.github.io`), sinon
+   la connexion échoue avec `auth/unauthorized-domain`. `localhost` est
+   autorisé par défaut pour vos tests locaux.
 2. **Realtime Database** — créez une base (choisissez la région la plus
    proche ; la configuration actuelle pointe vers
    `asia-southeast1`, ajustez `databaseURL` dans `js/firebase-config.js`
@@ -211,9 +216,9 @@ Aucune dépendance npm n'est nécessaire pour la campagne elle-même.
 
 ## 🎮 Déroulement
 
-1. **Lobby** (`index.html`) — connexion email/mot de passe, puis un joueur
-   crée une room (devient **Technicien**), l'autre la rejoint avec le code
-   à 4 caractères (devient **Opérateur**).
+1. **Lobby** (`index.html`) — connexion avec un compte Google, puis un
+   joueur crée une room (devient **Technicien**), l'autre la rejoint avec
+   le code à 4 caractères (devient **Opérateur**).
 2. **Hub Spatial** (`hub.html`) — dès que les deux joueurs sont connectés,
    ils arrivent sur le Hub : état de la campagne (ressources, missions
    terminées/disponibles/verrouillées) et sélection de la prochaine
@@ -294,10 +299,12 @@ redémarre automatiquement.
 
 ## 🔐 Connexion et sauvegarde de campagne
 
-La connexion email/mot de passe est obligatoire pour créer ou rejoindre
-une room. La sauvegarde Firestore est mise à jour depuis le Hub après
-chaque synchronisation de campagne. Un retour dans la même room restaure
-la progression sauvegardée lorsque la campagne n'a pas encore commencé
+La connexion Google est obligatoire pour créer ou rejoindre une room.
+Elle s'ouvre dans une fenêtre popup, avec bascule automatique sur une
+redirection si le navigateur bloque les popups (notamment sur mobile).
+La sauvegarde Firestore est mise à jour depuis le Hub après chaque
+synchronisation de campagne. Un retour dans la même room restaure la
+progression sauvegardée lorsque la campagne n'a pas encore commencé
 dans cette room.
 
 ## 📁 Structure du dépôt
@@ -311,7 +318,7 @@ operator.html         → Rôle Opérateur
 
 js/
   firebase-config.js   → Clés Firebase publiques (à configurer)
-  firebase-auth.js      → StationAuth : Auth email/mot de passe + sauvegarde Firestore
+  firebase-auth.js      → StationAuth : Auth Google + sauvegarde Firestore
   missions-data.js      → Données de campagne (ex server/data/missions.js)
   campaign-engine.js     → Moteur de campagne pur (ex server/campaign.js)
   rtdb-client.js         → Transport temps réel Firebase RTDB (remplace WS/serveur,

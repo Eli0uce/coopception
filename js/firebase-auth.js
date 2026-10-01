@@ -24,14 +24,21 @@ const StationAuth = (() => {
     return auth.currentUser;
   }
 
-  async function signIn(email, password) {
+  async function signInWithGoogle() {
     await init();
-    return auth.signInWithEmailAndPassword(email, password);
-  }
-
-  async function signUp(email, password) {
-    await init();
-    return auth.createUserWithEmailAndPassword(email, password);
+    const provider = new firebase.auth.GoogleAuthProvider();
+    provider.setCustomParameters({ prompt: 'select_account' });
+    try {
+      return await auth.signInWithPopup(provider);
+    } catch (error) {
+      // Popup bloquée/fermée : bascule sur la redirection (utile sur mobile)
+      const fallback = ['auth/popup-blocked', 'auth/operation-not-supported-in-this-environment'];
+      if (fallback.includes(error.code)) {
+        await auth.signInWithRedirect(provider);
+        return null;
+      }
+      throw error;
+    }
   }
 
   async function signOut() {
@@ -58,14 +65,15 @@ const StationAuth = (() => {
 
   function errorMessage(error) {
     const messages = {
-      'auth/invalid-email': 'Adresse email invalide.',
-      'auth/user-not-found': 'Compte introuvable.',
-      'auth/wrong-password': 'Mot de passe incorrect.',
-      'auth/email-already-in-use': 'Cette adresse est déjà utilisée.',
-      'auth/weak-password': 'Le mot de passe doit contenir au moins 6 caractères.'
+      'auth/popup-closed-by-user': 'Connexion annulée.',
+      'auth/cancelled-popup-request': 'Connexion annulée.',
+      'auth/popup-blocked': 'La fenêtre Google a été bloquée par le navigateur.',
+      'auth/unauthorized-domain': "Ce domaine n'est pas autorisé dans Firebase Authentication.",
+      'auth/account-exists-with-different-credential': 'Un compte existe déjà avec cette adresse.',
+      'auth/network-request-failed': 'Réseau indisponible.'
     };
-    return messages[error.code] || 'Connexion Firebase impossible.';
+    return messages[error.code] || 'Connexion Google impossible.';
   }
 
-  return { init, currentUser, signIn, signUp, signOut, saveCampaign, loadCampaign, errorMessage };
+  return { init, currentUser, signInWithGoogle, signOut, saveCampaign, loadCampaign, errorMessage };
 })();
