@@ -1,14 +1,167 @@
 # 🚀 STATION ZÉRO — Jeu coopératif asymétrique
 
-## 🔐 Connexion et sauvegarde Firebase
+Jeu coopératif 2 joueurs pour navigateur, inspiré de *Operation: Tango* et
+*We Were Here*. Un joueur est le **🖥 Technicien** (accès aux manuels, codes,
+tables de correspondance), l'autre l'**⚙ Opérateur** (contrôle les panneaux,
+cadrans, leviers). Ni l'un ni l'autre ne peut réussir seul : il faut
+communiquer.
 
-La version WebSocket actuelle utilise Firebase Authentication pour identifier les joueurs et
-Cloud Firestore pour sauvegarder la progression de campagne par compte et par room.
+Le dépôt contient **deux implémentations** :
 
-1. Dans Firebase Console, activez **Authentication → Sign-in method → Email/Password**.
-2. Activez **Cloud Firestore** en mode production.
-3. Conservez la configuration publique dans `client/js/firebase-config.js`.
-4. Ajoutez ces règles Firestore (les utilisateurs ne peuvent lire et écrire que leurs sauvegardes) :
+1. **Racine du dépôt** (`index.html`, `hub.html`, `technician.html`,
+   `operator.html`, `js/`, `css/`) — la **Campagne STATION ZÉRO**, 5 missions
+   déblocables avec ressources de station, choix narratifs, indices,
+   plusieurs fins, et sauvegarde de progression. **100 % statique**, sans
+   aucun serveur : c'est la version déployée sur GitHub Pages et documentée
+   ci-dessous.
+2. **`legacy/`** — l'ancien prototype autonome (un seul niveau, puzzles
+   aléatoires, cinématiques, chat vocal WebRTC), conservé tel quel pour
+   mémoire, non maintenu.
+
+---
+
+## 🛰️ Architecture — tout tourne dans le navigateur
+
+Il n'y a **plus de serveur Node/Express/WebSocket**. Le dossier `server/` a
+été supprimé : toute la logique de jeu qui vivait auparavant dans
+`server/campaign.js` / `server/data/missions.js` / `server/server.js` a été
+portée en scripts navigateur classiques (`<script>`, pas de bundler, pas de
+module) :
+
+| Avant (Node) | Maintenant (navigateur) | Rôle |
+|---|---|---|
+| `server/data/missions.js` | `js/missions-data.js` (global `MissionsData`) | Données de campagne : missions, puzzles, hints, briefings, fins |
+| `server/campaign.js` | `js/campaign-engine.js` (global `CampaignEngine`) | Moteur pur : déverrouillage, validation des puzzles, ressources, étoiles, fins |
+| `server/server.js` (Express + `ws`) | `js/rtdb-client.js` (global `WS`) | Transport temps réel — **remplace le WebSocket par Firebase Realtime Database**, même API `connect / send / on / off` qu'avant |
+
+`lobby.js`, `hub.js`, `technician.js`, `operator.js` et `chat.js` n'ont
+quasiment pas changé : ils parlent toujours au même objet global `WS` avec
+les mêmes types de messages (`room:create`, `hub:state`,
+`mission:started`, `puzzle:solved`, …). Seuls les chemins de navigation
+`/hub` et `/` ont été remplacés par `hub.html` et `index.html` (GitHub Pages
+ne réécrit pas les chemins sans extension).
+
+### 👑 Modèle d'autorité (qui décide quoi)
+
+Comme il n'y a plus de serveur, **le navigateur du Technicien de chaque
+room fait office d'hôte autoritaire** :
+
+- c'est lui qui exécute `CampaignEngine` (valide les actions de puzzle,
+  applique les conséquences des choix, calcule les étoiles, résout les
+  fins de campagne) ;
+- c'est lui qui fait tourner le **minuteur de mission** (`setInterval` de
+  1 seconde, comme l'ancien serveur) ;
+- il réplique le résultat de chaque action dans Firebase Realtime
+  Database sous `rooms/{code}/…` ;
+- l'**Opérateur n'exécute jamais de logique de jeu** : il envoie ses
+  actions (`puzzle:action`, `hint:request`, `mission:start`, `hub:return`,
+  `campaign:reset`) dans une file d'attente RTDB (`rooms/{code}/requests`)
+  que le Technicien consomme dès qu'il est en ligne, et il se contente de
+  réagir aux changements d'état répliqués par le Technicien.
+
+Conséquence pratique : **le navigateur du Technicien doit rester ouvert**
+pour que la partie progresse (minuteur, validation). S'il ferme son onglet
+en pleine mission, le minuteur s'arrête jusqu'à ce qu'il revienne — en
+rouvrant `technician.html`, son navigateur reconstruit l'état de mission
+depuis Firebase (`session:resume`) et relance le minuteur là où il s'était
+arrêté.
+
+### 🗄️ Schéma Firebase Realtime Database
+
+```
+rooms/{code}/
+  meta/            { technicianUid, operatorUid,
+                     technicianOnline, operatorOnline, createdAt }
+  campaign/        { resources, completedMissions, flags, ending }
+  phase            'hub' | 'mission'
+  mission/         runtime de la mission active (autorité Technicien) :
+                   { missionId, puzzleIndex, timeLeft, totalPuzzles,
+                     resources, puzzleStates, totalAttempts, totalHints,
+                     choiceLog, lastEvent }
+                   `lastEvent` sert de "slot" horodaté pour les
+                   notifications ponctuelles (puzzle résolu/raté, indice,
+                   avancée de puzzle, démarrage) que l'Opérateur détecte
+                   par différence d'horodatage.
+  result/          résultat de fin de mission (succès → étoiles/débrief/
+                   récompenses/déblocages/fin ; échec → raison), un seul
+                   slot horodaté
+  roomEvent/       notifications hors-mission (room:ready, mission:aborted,
+                   campaign:reset, erreurs ciblées via `onlyRole`)
+  requests/{id}    file d'actions Opérateur → Technicien (consommée puis
+                   supprimée par le Technicien)
+  chat/{id}        messages de tchat
+  progress/        dernier message `puzzle:progress` (passthrough live)
+```
+
+Toutes les lectures/écritures exigent un utilisateur Firebase Auth
+authentifié (voir règles plus bas).
+
+---
+
+## ⚙️ Configuration Firebase (obligatoire)
+
+Le jeu utilise **trois produits Firebase**, déjà référencés dans
+`js/firebase-config.js` :
+
+1. **Authentication → Sign-in method → Email/Password** — activez-le. La
+   connexion par email/mot de passe est **obligatoire** pour créer ou
+   rejoindre une room (gérée par `js/firebase-auth.js`, module
+   `StationAuth`).
+2. **Realtime Database** — créez une base (choisissez la région la plus
+   proche ; la configuration actuelle pointe vers
+   `asia-southeast1`, ajustez `databaseURL` dans `js/firebase-config.js`
+   si vous créez votre propre projet). C'est la couche de synchronisation
+   temps réel entre le Technicien et l'Opérateur (remplace l'ancien
+   serveur WebSocket).
+3. **Cloud Firestore** — activez-le en mode production. Sert uniquement à
+   sauvegarder la progression de campagne par compte et par room
+   (`users/{uid}/campaigns/{roomCode}`), pour pouvoir la restaurer si vous
+   recréez une room avec le même compte.
+
+Collez votre propre configuration publique dans `js/firebase-config.js` :
+
+```js
+const FIREBASE_CONFIG = {
+  apiKey: "...",
+  authDomain: "...",
+  databaseURL: "https://VOTRE-PROJET-default-rtdb.VOTRE-REGION.firebasedatabase.app",
+  projectId: "...",
+  storageBucket: "...",
+  messagingSenderId: "...",
+  appId: "..."
+};
+```
+
+> La clé Firebase visible dans le navigateur n'est pas un secret. La
+> sécurité repose sur Authentication et sur les règles Realtime
+> Database/Firestore ci-dessous — ne déployez jamais avec des règles
+> ouvertes (`".read": true, ".write": true`) en production.
+
+### 🔐 Règles Realtime Database (à coller dans Console → Realtime Database → Règles)
+
+Exige un utilisateur authentifié et limite chaque room à son propre
+sous-arbre `rooms/{code}` :
+
+```json
+{
+  "rules": {
+    "rooms": {
+      "$code": {
+        ".read": "auth != null",
+        ".write": "auth != null",
+        "chat": {
+          ".indexOn": ["ts"]
+        }
+      }
+    }
+  }
+}
+```
+
+### 🔐 Règles Cloud Firestore (à coller dans Console → Firestore → Règles)
+
+Chaque utilisateur ne peut lire/écrire que ses propres sauvegardes de
+campagne :
 
 ```text
 rules_version = '2';
@@ -21,63 +174,59 @@ service cloud.firestore {
 }
 ```
 
-La connexion est obligatoire pour créer ou rejoindre une room. La sauvegarde est mise à jour
-depuis le Hub après chaque synchronisation de campagne. Un retour dans la même room restaure
-la progression sauvegardée lorsque la campagne n'a pas encore commencé. La progression en
-cours reste également maintenue en mémoire par le serveur pour permettre la reconnexion des
-deux joueurs.
+---
 
-> La clé Firebase visible dans le navigateur n'est pas un secret. La sécurité repose sur
-> Authentication et les règles Firestore ; ne laissez pas de règles publiques en production.
+## 🌐 Déploiement GitHub Pages
 
-Jeu coopératif 2 joueurs pour navigateur, inspiré de *Operation: Tango* et *We Were Here*.
+Aucune étape de build. Le site est servi tel quel depuis la racine du
+dépôt (`.nojekyll` est présent pour éviter que Jekyll ignore les dossiers
+commençant par `_`, et pour servir les fichiers tels quels).
 
-Ce dépôt contient **deux implémentations** :
+```bash
+git add . && git commit -m "Campagne 100% statique (GitHub Pages)"
+git push
+```
 
-1. **`client/` + `server/`** — version active, avec **serveur Node/WebSocket
-   autoritaire** et une **campagne à missions multiples** (recommandée, voir
-   ci-dessous).
-2. **Racine du dépôt** (`index.html`, `js/`, `css/`) — version historique
-   autonome basée sur **Firebase Realtime Database**, sans serveur de jeu
-   (documentée plus bas, section *Version historique*).
+Puis : **Settings → Pages → Source : Deploy from a branch → branch
+`main` / dossier `/ (root)`**.
+
+GitHub Pages ne réécrit pas les chemins sans extension : toutes les
+navigations internes utilisent donc des noms de fichiers explicites
+(`hub.html`, `index.html`) plutôt que `/hub` ou `/`.
+
+### ▶️ Test local rapide
+
+Avec Python (déjà présent sur la plupart des systèmes) :
+
+```bash
+python3 -m http.server 8080
+```
+
+Ouvrez **http://localhost:8080** dans deux onglets/navigateurs différents
+(un pour le Technicien, un pour l'Opérateur) — ou n'importe quel autre
+serveur de fichiers statiques (`npx serve .`, extension "Live Server", …).
+Aucune dépendance npm n'est nécessaire pour la campagne elle-même.
 
 ---
 
-## 🛰️ Version Campagne (client/ + server/) — recommandée
+## 🎮 Déroulement
 
-Un serveur Node.js **autoritaire** (aucune logique de jeu côté client) gère
-une **campagne** de 5 missions déblocables, avec ressources de station,
-choix narratifs à conséquences, indices, plusieurs fins, et reprise de
-session après rechargement de page.
-
-### ▶️ Lancer le serveur
-
-```bash
-cd server
-npm install
-npm start          # ou : npm run dev
-```
-
-Ouvrez **http://localhost:3000** dans deux onglets/navigateurs différents
-(un pour le Technicien, un pour l'Opérateur).
-
-### 🎮 Déroulement
-
-1. **Lobby** (`/`) — un joueur crée une room (devient **Technicien**), l'autre
-   la rejoint avec le code à 4 caractères (devient **Opérateur**).
-2. **Hub Spatial** (`/hub`) — dès que les deux joueurs sont connectés, ils
-   arrivent sur le Hub : état de la campagne (ressources, missions
-   terminées/disponibles/verrouillées) et sélection de la prochaine mission.
-   L'état du Hub est entièrement calculé et envoyé par le serveur.
+1. **Lobby** (`index.html`) — connexion email/mot de passe, puis un joueur
+   crée une room (devient **Technicien**), l'autre la rejoint avec le code
+   à 4 caractères (devient **Opérateur**).
+2. **Hub Spatial** (`hub.html`) — dès que les deux joueurs sont connectés,
+   ils arrivent sur le Hub : état de la campagne (ressources, missions
+   terminées/disponibles/verrouillées) et sélection de la prochaine
+   mission.
 3. **Mission** (`technician.html` / `operator.html`) — les deux rôles
-   résolvent ensemble les modules de la mission choisie (puzzles + décisions),
-   guidés par le **Technicien** (informations) et exécutés par l'**Opérateur**
-   (contrôles).
-4. **Débrief** — succès (étoiles, récompenses de ressources, déblocages) ou
-   échec (temps écoulé) ramène les deux joueurs au Hub pour continuer la
-   campagne.
+   résolvent ensemble les modules de la mission choisie (puzzles +
+   décisions), guidés par le **Technicien** (informations) et exécutés par
+   l'**Opérateur** (contrôles).
+4. **Débrief** — succès (étoiles, récompenses de ressources, déblocages)
+   ou échec (temps écoulé) ramène les deux joueurs au Hub pour continuer
+   la campagne.
 
-### 🗺️ Les missions
+## 🗺️ Les missions
 
 | # | Mission | Codename | Puzzles | Prérequis |
 |---|---------|----------|---------|-----------|
@@ -93,7 +242,7 @@ campagne (**Intégrité**, **Confiance**, **Renseignement**) et peut poser des
 des **4 fins** (Ascension, Rédemption, Effondrement, Survie) est obtenue à
 l'issue de la mission finale.
 
-### 🧩 Types de puzzles
+## 🧩 Types de puzzles
 
 | Type | Description |
 |------|--------------|
@@ -105,19 +254,20 @@ l'issue de la mission finale.
 | `final_protocol` | Séquence multi-étapes (interrupteur + code + leviers) |
 | `choice` | Dilemme narratif → conséquences sur les ressources/fins |
 
-### 🔌 Protocole WebSocket (aperçu)
+## 🔌 Protocole (messages `WS`, inchangés depuis la version WebSocket)
 
-| Message client → serveur | Rôle |
+| Message → (Technicien ou Opérateur selon contexte) | Rôle |
 |---|---|
 | `room:create` / `room:join` | Lobby |
-| `session:resume { code, role }` | Reprend l'état courant (Hub ou mission en cours) — utilisé au chargement du Hub, des pages de rôle, et après un rechargement de page (reconnexion) |
+| `session:resume { code, role }` | Reprend l'état courant (Hub ou mission en cours) — utilisé au chargement du Hub, des pages de rôle, et après un rechargement de page |
 | `mission:start { missionId }` | Démarre une mission déverrouillée |
 | `puzzle:action { action }` | Soumet une réponse (Opérateur uniquement) |
 | `hint:request` | Demande un indice sur le puzzle courant |
 | `hub:return` | Abandonne la mission en cours, retour au Hub |
 | `campaign:reset` | Réinitialise la progression de la room |
+| `campaign:restore { campaign }` | Restaure une sauvegarde Firestore (Technicien, hub vide uniquement) |
 
-| Message serveur → client | Rôle |
+| Message ← (diffusé via Firebase) | Rôle |
 |---|---|
 | `hub:state` | Ressources + statut de chaque mission |
 | `mission:started` / `mission:resume` | Démarrage ou reprise d'une mission |
@@ -128,156 +278,64 @@ l'issue de la mission finale.
 | `player:disconnected` / `player:reconnected` | État de connexion de l'autre joueur |
 
 Toute la logique (déverrouillage, validation des puzzles, ressources, fins)
-vit côté serveur dans `server/campaign.js` et `server/data/missions.js` — le
-client ne fait qu'afficher l'état reçu et envoyer des actions.
+vit dans `js/campaign-engine.js` + `js/missions-data.js`, exécutée par le
+navigateur du Technicien — les autres scripts ne font qu'afficher l'état
+reçu et envoyer des actions.
 
-### 🔁 Reconnexion
+## 🔁 Reconnexion
 
-Si un onglet se recharge ou se déconnecte brièvement, la room reste en
-mémoire pendant 5 minutes. Au rechargement, la page envoie
-`session:resume` avec le code de room et le rôle stockés en
-`sessionStorage`, et le serveur renvoie l'état exact (Hub ou puzzle en
-cours) pour reconstruire l'interface.
+Si un onglet se recharge, la page envoie `session:resume` avec le code de
+room et le rôle stockés en `sessionStorage`. Le navigateur (Technicien ou
+Opérateur) relit l'état courant dans Firebase Realtime Database et
+reconstruit l'interface (Hub ou puzzle en cours). Côté Technicien, le
+runtime de mission (puzzles résolus, indices utilisés, temps restant) est
+entièrement reconstruit depuis `rooms/{code}/mission` et le minuteur
+redémarre automatiquement.
 
-### 📁 Structure (`client/` + `server/`)
+## 🔐 Connexion et sauvegarde de campagne
 
-```
-server/
-  server.js          → Serveur HTTP + WebSocket, routage des messages
-  campaign.js         → Moteur de campagne (déverrouillage, validation, fins)
-  data/missions.js    → Définitions des 5 missions (puzzles, choix, récompenses)
+La connexion email/mot de passe est obligatoire pour créer ou rejoindre
+une room. La sauvegarde Firestore est mise à jour depuis le Hub après
+chaque synchronisation de campagne. Un retour dans la même room restaure
+la progression sauvegardée lorsque la campagne n'a pas encore commencé
+dans cette room.
 
-client/
-  index.html          → Lobby (création / jonction de room)
-  hub.html / js/hub.js → Hub Spatial (état de campagne, sélection de mission)
-  technician.html / js/technician.js → Rôle Technicien
-  operator.html  / js/operator.js  → Rôle Opérateur
-  js/ws-client.js      → Client WebSocket partagé
-  js/chat.js           → Chat texte partagé
-  css/                 → Thèmes (vert Technicien, ambre Opérateur, bleu Hub)
-```
-
----
-
-## 🕯️ Version historique (Firebase, racine du dépôt)
-
-**Jouable à distance via Firebase + GitHub Pages — aucun serveur requis.**
-
----
-
-## ⚙️ Configuration Firebase (obligatoire)
-
-1. Aller sur [console.firebase.google.com](https://console.firebase.google.com) → Créer un projet
-2. **Realtime Database** → Créer une base → **Mode test**
-3. ⚙️ Paramètres → **Ajouter une app Web** → copier `firebaseConfig`
-4. Coller dans `js/firebase-config.js`
-5. Règles DB : `{ "rules": { ".read": true, ".write": true } }`
-
----
-
-## 🌐 Déploiement GitHub Pages
-
-```bash
-git add . && git commit -m "Initial"
-git push -u origin master
-```
-
-Puis : **Settings → Pages → Source : master / root**
-
----
-
-## ▶️ Test local rapide
-
-```bash
-npx serve .
-```
-
-Ouvrez **http://localhost:3000** dans deux onglets/navigateurs différents.
-
----
-
-## 🎮 Concept
-
-Deux joueurs sur une station spatiale en perdition :
-
-| Rôle | Description |
-|------|-------------|
-| **🖥 Technicien** | Accès aux manuels numériques, codes, tables de correspondance |
-| **⚙ Opérateur** | Contrôle les panneaux physiques, cadrans, leviers, claviers |
-
-Ni l'un ni l'autre ne peut réussir seul — communiquez via le **chat vocal WebRTC** intégré !
-
----
-
-## 🧩 Les puzzles (sélection aléatoire à chaque partie)
-
-| Type | Difficulté | Description |
-|------|-----------|-------------|
-| **Code Croisé** | Facile | Table de correspondance → séquence de chiffres |
-| **Symboles** | Facile | Variante avec symboles (★, ◆, ⬡...) |
-| **Séquence Miroir** | Moyen | Couleurs cibles → commutateurs colorés |
-| **Déchiffrage** | Moyen | Clé de chiffrement → mot à déchiffrer |
-| **Calibrage** | Moyen | Valeurs cibles → ajustement de curseurs (±3 tolérance) |
-| **Câblage** | Difficile | Schéma de connexions fil→port |
-| **Protocole Final** | Difficile | Séquence multi-étapes (interrupteurs + code + leviers) |
-
-Les puzzles sont **randomisés** (3–5 puzzles par partie, un par type, triés par difficulté croissante).
-
----
-
-## 📖 Scénario
-
-Station Zéro orbite autour d'Europe en 2157. Un sabotage interne déclenche une défaillance en cascade.  
-Il reste **15 minutes** avant la dépressurisation totale.  
-Le **Technicien (Aria)** et l'**Opérateur (Cole)** doivent réactiver les modules ensemble, sans se voir.
-
----
-
-## 🔊 Fonctionnalités
-
-- **Chat vocal WebRTC P2P** — Firebase comme serveur de signaling STUN
-- **Cinématiques synchronisées** — dialogues entre puzzles, pilotés par le Technicien
-- **Audio procédural** — Web Audio API (effets, alarmes, musique spatiale générative)
-- **Timer adaptatif** — durée calculée selon les puzzles tirés
-- **Effets visuels** — glitch, radar animé, CRT scanlines, champ d'étoiles
-
----
-
-## 📁 Structure
+## 📁 Structure du dépôt
 
 ```
-index.html            → Menu principal / Lobby
-technician.html       → Page du Technicien
-operator.html         → Page de l'Opérateur
+index.html            → Lobby (connexion + création/jonction de room)
+hub.html              → Hub Spatial (état de campagne, sélection de mission)
+technician.html       → Rôle Technicien
+operator.html         → Rôle Opérateur
+.nojekyll             → Désactive le traitement Jekyll sur GitHub Pages
 
 js/
-  firebase-config.js  → Clés Firebase (à configurer)
-  firebase-db.js      → Couche d'abstraction Firebase Realtime DB
-  puzzles.js          → Banque de puzzles + randomisation + validation
-  scenario.js         → Moteur de cinématiques synchronisées (Firebase)
-  audio.js            → AudioManager complet (Web Audio API)
-  voice-chat.js       → WebRTC P2P via Firebase signaling
-  lobby.js            → Création / rejoindre une room
-  technician.js       → Logique page Technicien
-  operator.js         → Logique page Opérateur
+  firebase-config.js   → Clés Firebase publiques (à configurer)
+  firebase-auth.js      → StationAuth : Auth email/mot de passe + sauvegarde Firestore
+  missions-data.js      → Données de campagne (ex server/data/missions.js)
+  campaign-engine.js     → Moteur de campagne pur (ex server/campaign.js)
+  rtdb-client.js         → Transport temps réel Firebase RTDB (remplace WS/serveur,
+                           global `WS` avec la même API que l'ancien ws-client.js)
+  lobby.js / hub.js / technician.js / operator.js → Logique par page
+  chat.js                → Chat texte partagé
+  hub-scene.js           → Décor 3D Three.js du Hub (module ES)
+  vendor/three.module.min.js → Three.js (fichier local, pas de CDN)
 
 css/
-  main.css            → Variables CSS, composants partagés
-  technician.css       → Styles thème vert (Technicien)
-  operator.css         → Styles thème ambre (Opérateur)
+  main.css / hub.css / technician.css / operator.css → Thèmes (vert
+  Technicien, ambre Opérateur, bleu Hub)
+
+legacy/                 → Ancien prototype autonome (Firebase RTDB, puzzles
+                           aléatoires, cinématiques, chat vocal WebRTC) —
+                           conservé pour mémoire, non maintenu, non lié à
+                           la campagne ci-dessus. Mêmes noms de fichiers
+                           (`js/`, `css/`, `index.html`, …) mais isolés
+                           dans leur propre dossier pour éviter toute
+                           collision avec la campagne servie à la racine.
 ```
 
----
-
-## 🛡️ Règles Firebase Realtime Database
-
-```json
-{
-  "rules": {
-    ".read": true,
-    ".write": true
-  }
-}
-```
-
-> ⚠️ En production, restreignez l'accès par authentification Firebase.
+> Le dossier `server/` (Express + `ws`, serveur WebSocket Node.js) a été
+> **supprimé** : toute sa logique vit maintenant dans `js/campaign-engine.js`
+> et `js/missions-data.js`, et son rôle de transport est assuré par
+> Firebase Realtime Database via `js/rtdb-client.js`. Le jeu est
+> entièrement jouable sans Node, serveur ni étape de build.

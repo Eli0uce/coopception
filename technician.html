@@ -3,36 +3,53 @@
 <head>
   <meta charset="UTF-8">
   <title>STATION ZÉRO — Technicien</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖥</text></svg>">
   <link rel="stylesheet" href="css/main.css">
   <link rel="stylesheet" href="css/technician.css">
 </head>
 <body>
 <div class="scanline"></div>
 
+<!-- Overlay de connexion / reprise de session -->
 <div id="start-overlay" style="position:fixed;inset:0;background:rgba(0,0,0,0.95);display:flex;align-items:center;justify-content:center;z-index:8000;flex-direction:column;gap:20px;">
   <div style="font-family:'VT323',monospace;font-size:60px;color:var(--green);text-shadow:var(--glow);">STATION ZÉRO</div>
   <div style="font-size:14px;letter-spacing:3px;color:var(--green-dim)">RÔLE : <span style="color:var(--green)">TECHNICIEN</span></div>
-  <div style="font-size:13px;color:var(--amber);letter-spacing:2px;text-align:center;max-width:400px;line-height:1.8;">
+  <div style="font-size:13px;color:var(--amber);letter-spacing:2px;text-align:center;max-width:400px;line-height:1.8;" id="start-hint">
     Vous avez accès aux manuels numériques.<br>Guidez l'Opérateur à travers les panneaux de contrôle.
   </div>
-  <button class="btn primary" id="btn-start">⚡ LANCER LA MISSION</button>
+  <div class="blink" style="color:var(--green);letter-spacing:3px;font-size:14px;">⏳ SYNCHRONISATION AVEC LA STATION...</div>
 </div>
 
+<!-- Overlay de fin (défaite) -->
 <div id="end-overlay">
   <div id="end-card">
     <h1 id="end-title">VICTOIRE</h1>
     <p id="end-reason"></p>
-    <button class="btn" onclick="GameDB.cleanupRoom().then(()=>location.href='index.html')">↩ RETOUR AU LOBBY</button>
+    <p id="end-debrief" style="font-size:13px;color:var(--amber);max-width:380px;"></p>
+    <button class="btn" id="btn-end-hub">↩ RETOUR AU HUB</button>
   </div>
 </div>
 
+<!-- Overlay Mission Réussie -->
+<div id="mission-complete-overlay">
+  <div id="mission-complete-card">
+    <div class="mc-stars" id="mc-stars">★ ★ ★</div>
+    <h1>MISSION RÉUSSIE</h1>
+    <p class="mc-subtitle" id="mc-debrief">STATION RÉACTIVÉE AVEC SUCCÈS<br>RETOUR AU QUARTIER GÉNÉRAL</p>
+    <p class="mc-subtitle" id="mc-ending" style="display:none;color:var(--amber);"></p>
+    <button class="btn" id="btn-hub">🚀 VERS LE HUB SPATIAL</button>
+  </div>
+</div>
+
+<!-- Layout principal -->
 <div class="tech-layout" id="game-area" style="display:none;">
   <div class="tech-header">
     <div class="role-label">🖥 TECHNICIEN</div>
     <div id="timer-display">15:00</div>
     <div class="module-name" id="module-name">MODULE ???</div>
   </div>
+
+  <div class="mission-banner" id="mission-banner"></div>
+
   <div class="tech-main">
     <div class="terminal-block" id="info-panel" data-title="INFORMATIONS SYSTÈME">
       <div id="puzzle-info"></div>
@@ -41,22 +58,39 @@
       <div id="log-content" style="color:var(--green-dim);font-size:13px;line-height:2;"></div>
     </div>
   </div>
+
   <div class="tech-footer">
     <div class="puzzle-progress" id="puzzle-dots"></div>
     <div style="font-size:12px;color:var(--green-dim);" id="footer-status">EN ATTENTE...</div>
+    <div class="footer-actions">
+      <button class="btn small" id="btn-hint">💡 INDICE</button>
+      <button class="btn small danger" id="btn-abandon">🏠 ABANDONNER</button>
+    </div>
   </div>
 </div>
 
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-database-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-auth-compat.js"></script>
+<!-- Chat -->
+<div id="chat-widget">
+  <div id="chat-body" style="display:flex;">
+    <div id="chat-messages"></div>
+    <div id="chat-input-row">
+      <input type="text" id="chat-input" placeholder="Message...">
+      <button id="chat-send">➤</button>
+    </div>
+  </div>
+  <button id="chat-toggle">💬 COMM — MASQUER</button>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <script src="js/firebase-config.js"></script>
-<script src="js/puzzles.js"></script>
-<script src="js/firebase-db.js"></script>
-<script src="js/audio.js"></script>
-<script src="js/scenario.js"></script>
-<script src="js/voice-chat.js"></script>
+<script src="js/firebase-auth.js"></script>
+<script src="js/missions-data.js"></script>
+<script src="js/campaign-engine.js"></script>
+<script src="js/rtdb-client.js"></script>
+<script src="js/chat.js"></script>
 <script src="js/technician.js"></script>
 </body>
 </html>
-

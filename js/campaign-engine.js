@@ -1,13 +1,18 @@
 /**
- * campaign.js — Modèle de campagne serveur-autoritaire
+ * campaign-engine.js — Modèle de campagne autoritaire (exécuté navigateur)
  *
  * Gère l'état de progression d'une room à travers la campagne de missions :
  * déverrouillage, ressources, résultats de mission, indices, fins multiples.
- * Toute la logique de validation vit ici ; le serveur (server.js) ne fait que
- * router les messages WebSocket vers ces fonctions.
+ * Toute la logique de validation vit ici ; c'est le Technicien (hôte/autorité
+ * de la room, voir js/rtdb-client.js) qui invoque ces fonctions pures et
+ * réplique le résultat vers Firebase Realtime Database.
+ *
+ * Exposé comme variable globale `CampaignEngine`, dépend du global
+ * `MissionsData` (voir js/missions-data.js, à charger avant ce script).
  */
+const CampaignEngine = (() => {
 
-const { MISSIONS, ENDINGS, RESOURCE_KEYS, INITIAL_RESOURCES } = require('./data/missions');
+const { MISSIONS, ENDINGS, RESOURCE_KEYS, INITIAL_RESOURCES } = MissionsData;
 
 const MAX_HINTS_PER_PUZZLE = 3;
 
@@ -283,20 +288,21 @@ function completeMission(campaign, mission, runtime, win) {
   return { result, newlyUnlocked, ending: campaign.ending };
 }
 
-module.exports = {
-  MISSIONS,
-  findMission,
-  createCampaign,
-  sanitizeCampaign,
-  isMissionUnlocked,
-  missionStatus,
-  getHubPayload,
-  canStartMission,
-  startMissionRuntime,
-  getPuzzleForRole,
-  validateAction,
-  getHint,
-  applyConsequence,
-  completeMission,
-  MAX_HINTS_PER_PUZZLE
-};
+  return {
+    MISSIONS,
+    findMission,
+    createCampaign,
+    sanitizeCampaign,
+    isMissionUnlocked,
+    missionStatus,
+    getHubPayload,
+    canStartMission,
+    startMissionRuntime,
+    getPuzzleForRole,
+    validateAction,
+    getHint,
+    applyConsequence,
+    completeMission,
+    MAX_HINTS_PER_PUZZLE
+  };
+})();

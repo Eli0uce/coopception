@@ -1,62 +1,94 @@
-GameDB.init();
-
 function switchTab(name) {
-  document.querySelectorAll('.tab').forEach((t,i) =>
-    t.classList.toggle('active', (name==='create'&&i===0)||(name==='join'&&i===1)));
+  document.querySelectorAll('.tab').forEach((t,i) => {
+    t.classList.toggle('active', (name==='create' && i===0)||(name==='join' && i===1));
+  });
   document.getElementById('tab-create').classList.toggle('active', name==='create');
   document.getElementById('tab-join').classList.toggle('active', name==='join');
 }
 
-async function createRoom() {
-  const btn = document.querySelector('#create-init .btn');
-  btn.textContent = '⏳ CRÉATION...'; btn.disabled = true;
-  try {
-    const code = await GameDB.createRoom();
-    sessionStorage.setItem('sz_role', 'technician');
-    sessionStorage.setItem('sz_room', code);
-    document.getElementById('create-init').style.display = 'none';
-    document.getElementById('create-waiting').style.display = 'block';
-    document.getElementById('room-code-text').textContent = code;
-    AudioManager.connect();
+let authenticated = false;
 
-    GameDB.onRoomReady(() => {
-      AudioManager.connect();
-      document.getElementById('create-waiting').innerHTML +=
-        '<div style="color:var(--green);margin-top:10px;font-size:13px;letter-spacing:2px;">✅ Opérateur connecté ! Redirection...</div>';
-      setTimeout(() => { window.location.href = 'technician.html'; }, 800);
-    });
-  } catch(e) {
-    btn.textContent = '⚡ CRÉER LA ROOM'; btn.disabled = false;
-    AudioManager.error();
-    showError('create-error', e.message);
-  }
+function setAuthStatus(text, error = false) {
+  const el = document.getElementById('auth-status');
+  el.textContent = text;
+  el.style.color = error ? 'var(--red)' : 'var(--green)';
 }
 
-async function joinRoom() {
+function requireAuth(action) {
+  if (!authenticated) {
+    setAuthStatus('⚠ Connectez-vous avant de créer ou rejoindre une room.', true);
+    return;
+  }
+  action();
+}
+
+StationAuth.init().then(user => {
+  authenticated = !!user;
+  if (user) {
+    document.getElementById('auth-form').style.display = 'none';
+    document.getElementById('auth-user').style.display = 'block';
+    document.getElementById('auth-email-label').textContent = `CONNECTÉ : ${user.email}`;
+  }
+}).catch(error => setAuthStatus(StationAuth.errorMessage(error), true));
+
+document.getElementById('auth-login').addEventListener('click', async () => {
+  try {
+    await StationAuth.signIn(document.getElementById('auth-email').value.trim(), document.getElementById('auth-password').value);
+    location.reload();
+  } catch (error) { setAuthStatus(StationAuth.errorMessage(error), true); }
+});
+
+document.getElementById('auth-register').addEventListener('click', async () => {
+  try {
+    await StationAuth.signUp(document.getElementById('auth-email').value.trim(), document.getElementById('auth-password').value);
+    location.reload();
+  } catch (error) { setAuthStatus(StationAuth.errorMessage(error), true); }
+});
+
+document.getElementById('auth-logout').addEventListener('click', () => StationAuth.signOut().then(() => location.reload()));
+
+WS.connect();
+
+WS.on('room:created', (msg) => {
+  document.getElementById('create-init').style.display = 'none';
+  document.getElementById('create-waiting').style.display = 'block';
+  document.getElementById('room-code-text').textContent = msg.code;
+  sessionStorage.setItem('sz_role', 'technician');
+  sessionStorage.setItem('sz_room', msg.code);
+});
+
+WS.on('room:joined', (msg) => {
+  sessionStorage.setItem('sz_role', 'operator');
+  sessionStorage.setItem('sz_room', msg.code);
+});
+
+WS.on('room:ready', () => {
+  setTimeout(() => {
+    window.location.href = 'hub.html';
+  }, 800);
+});
+
+WS.on('error', (msg) => {
+  document.getElementById('error-msg').textContent = '⚠ ' + msg.message;
+});
+
+function createRoom() {
+  requireAuth(() => StationAuth.currentUser().then(user => WS.send({ type: 'room:create', userId: user.uid })));
+}
+
+function joinRoom() {
   const code = document.getElementById('input-code').value.toUpperCase().trim();
-  if (code.length !== 4) { AudioManager.error(); showError('error-msg', '⚠ Le code doit faire 4 caractères.'); return; }
-  document.getElementById('error-msg').textContent = '';
-  const btn = document.querySelector('#tab-join .btn');
-  btn.textContent = '⏳ CONNEXION...'; btn.disabled = true;
-  try {
-    await GameDB.joinRoom(code);
-    sessionStorage.setItem('sz_role', 'operator');
-    sessionStorage.setItem('sz_room', code);
-    AudioManager.connect();
-    window.location.href = 'operator.html';
-  } catch(e) {
-    btn.textContent = '🔗 REJOINDRE'; btn.disabled = false;
-    AudioManager.error();
-    showError('error-msg', '⚠ ' + e.message);
+  if (code.length !== 4) {
+    document.getElementById('error-msg').textContent = '⚠ Le code doit faire 4 caractères.';
+    return;
   }
+  document.getElementById('error-msg').textContent = '';
+  requireAuth(() => StationAuth.currentUser().then(user => WS.send({ type: 'room:join', code, userId: user.uid })));
 }
 
-function showError(id, msg) {
-  const el = document.getElementById(id);
-  if (el) el.textContent = msg;
-}
-
+// Permettre de rejoindre avec Entrée
 document.getElementById('input-code').addEventListener('keydown', e => {
   if (e.key === 'Enter') joinRoom();
+  // Forcer majuscules
   setTimeout(() => { e.target.value = e.target.value.toUpperCase(); }, 0);
 });

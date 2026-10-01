@@ -12,7 +12,7 @@ const RESOURCE_LABELS = {
 };
 
 if (!role || !room) {
-  window.location.href = '/';
+  window.location.href = 'index.html';
 }
 
 function initMeta() {
@@ -143,7 +143,7 @@ function startMission(missionId) {
 
 WS.connect(() => {
   StationAuth.currentUser().then(async user => {
-    if (!user) { window.location.href = '/'; return; }
+    if (!user) { window.location.href = 'index.html'; return; }
     WS.send({ type: 'session:resume', code: room, role, userId: user.uid });
     if (role === 'technician') {
       const saved = await StationAuth.loadCampaign(room);
@@ -151,7 +151,7 @@ WS.connect(() => {
         WS.send({ type: 'campaign:restore', campaign: saved });
       }
     }
-  }).catch(() => { window.location.href = '/'; });
+  }).catch(() => { window.location.href = 'index.html'; });
 });
 
 WS.on('hub:state', payload => {
@@ -169,7 +169,7 @@ WS.on('hub:state', payload => {
 
 WS.on('session:expired', () => {
   sessionStorage.clear();
-  window.location.href = '/';
+  window.location.href = 'index.html';
 });
 
 WS.on('mission:started', () => {
@@ -196,7 +196,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initMeta();
 
   document.getElementById('btn-lobby').addEventListener('click', () => {
-    window.location.href = '/';
+    window.location.href = 'index.html';
   });
 
   document.getElementById('btn-reset').addEventListener('click', () => {

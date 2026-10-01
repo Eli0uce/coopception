@@ -1,40 +1,38 @@
-// ── Init ──
 const role = 'operator';
-let timerInterval = null;
-let startTimestamp = null;
-let lastPuzzleIndex = -1;
+const RESOURCE_LABELS = { integrity: 'INTÉGRITÉ', trust: 'CONFIANCE', intel: 'RENSEIGNEMENT' };
+
+let currentPuzzle = null;
+let totalPuzzles = 1;
+let puzzleIndex = 0;
+let lastResources = null;
+const roomCode = sessionStorage.getItem('sz_room');
+
+// State for each puzzle type
 let seqState = [];
 let finalState = { switch: null, code: '', levers: [], validate: false };
-let timeLimit = 900;
+let wireConnections = [];
+let wireSelected = null;
 
-GameDB.init();
-const roomCode = sessionStorage.getItem('sz_room');
 if (!roomCode) { location.href = 'index.html'; }
 
-// Rétablir la présence Firebase et attendre avant de setup les listeners
-GameDB.rejoinRoom(roomCode, 'operator').then(() => {
-  AudioManager.init();
-  AudioManager.boot();
-  // Opérateur = spectateur des cinématiques (contrôlées par le Technicien)
-  Scenario.initSync(
-    (sceneId, lineIdx) => GameDB.setCinematicLine(sceneId, lineIdx),
-    (sceneId, cb)      => GameDB.onCinematicLine(sceneId, cb)
-  );
-  VoiceChat.init('operator', roomCode, GameDB.getDb());
-  setupListeners();
+WS.connect(() => {
+  StationAuth.currentUser().then(user => {
+    if (!user) { location.href = 'index.html'; return; }
+    WS.send({ type: 'session:resume', code: roomCode, role, userId: user.uid });
+  }).catch(() => { location.href = 'index.html'; });
 });
+Chat.init(role);
 
-// ── UI Helpers ──
-function statusLog(text, color='var(--amber-dim)') {
+function statusLog(text, color = 'var(--amber-dim)') {
   const el = document.getElementById('status-area');
-  const d = document.createElement('div');
-  d.style.color = color;
-  d.textContent = '› ' + text;
-  el.appendChild(d);
+  const line = document.createElement('div');
+  line.style.color = color;
+  line.textContent = '› ' + text;
+  el.appendChild(line);
   el.parentElement.scrollTop = el.parentElement.scrollHeight;
 }
 
-function showNotif(text, type='success') {
+function showNotif(text, type = 'success') {
   const n = document.createElement('div');
   n.className = `notif ${type}`;
   n.textContent = text;
@@ -43,313 +41,523 @@ function showNotif(text, type='success') {
 }
 
 function setTimer(seconds) {
-  const m = String(Math.floor(seconds/60)).padStart(2,'0');
-  const s = String(seconds%60).padStart(2,'0');
+  const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+  const s = String(seconds % 60).padStart(2, '0');
   const el = document.getElementById('timer-display');
   el.textContent = `${m}:${s}`;
-  el.className = seconds<=60 ? 'danger' : seconds<=180 ? 'warning' : '';
+  el.className = seconds <= 60 ? 'danger' : seconds <= 180 ? 'warning' : '';
 }
 
 function buildDots(total, current) {
   const el = document.getElementById('puzzle-dots');
   el.innerHTML = '';
-  for (let i=0; i<total; i++) {
+  for (let i = 0; i < total; i++) {
     const d = document.createElement('div');
-    d.className = 'progress-dot'+(i<current?' done':i===current?' current':'');
+    d.className = 'progress-dot' + (i < current ? ' done' : i === current ? ' current' : '');
     el.appendChild(d);
   }
 }
 
-function startTimerLoop() {
-  clearInterval(timerInterval);
-  timerInterval = setInterval(() => {
-    if (!startTimestamp) return;
-    const elapsed = Math.floor((Date.now() - startTimestamp) / 1000);
-    const left = timeLimit - elapsed;
-    if (left <= 0) {
-      clearInterval(timerInterval);
-      setTimer(0);
-      AudioManager.stopAlarm();
-      GameDB.triggerTimeout();
-    } else {
-      setTimer(left);
-      if (left === 60) AudioManager.startAlarm();
-      if (left <= 10)  AudioManager.countdownUrgent();
-      else if (left <= 30 && left % 5 === 0) AudioManager.countdown();
+function logResourceDiff(resources) {
+  if (!lastResources) { lastResources = { ...resources }; return; }
+  Object.keys(resources).forEach(key => {
+    const delta = resources[key] - lastResources[key];
+    if (delta !== 0) {
+      const label = RESOURCE_LABELS[key] || key.toUpperCase();
+      statusLog(`${label} ${delta > 0 ? '+' : ''}${delta} (→ ${resources[key]})`, delta > 0 ? 'var(--green)' : 'var(--red)');
     }
-  }, 1000);
+  });
+  lastResources = { ...resources };
 }
 
-function submitAction(action) {
-  const result = validateAction(lastPuzzleIndex, action);
-  GameDB.submitResult(lastPuzzleIndex, result.valid, result.message);
+function setMissionBanner(mission) {
+  const el = document.getElementById('mission-banner');
+  el.innerHTML = `<span class="mb-title">${mission.icon || ''} ${mission.title}</span>${mission.briefing}`;
 }
 
-// ── Puzzle renderers ──
-function showPuzzle(index) {
-  if (index === lastPuzzleIndex) return;
-  lastPuzzleIndex = index;
+function sendAction(action) {
+  WS.send({ type: 'puzzle:action', action });
+}
+
+// ── Renderers ──
+function renderPuzzle(puzzle) {
+  currentPuzzle = puzzle;
   seqState = [];
   finalState = { switch: null, code: '', levers: [], validate: false };
-  const puzzle = PUZZLES[index];
-  document.getElementById('module-name').textContent = puzzle.module;
-  document.getElementById('footer-status').textContent = `PUZZLE ${index+1}/${PUZZLES.length}`;
-  buildDots(PUZZLES.length, index);
+  wireConnections = [];
+  wireSelected = null;
   const area = document.getElementById('controls-area');
   area.innerHTML = '';
-  const hdr = document.createElement('div');
-  hdr.innerHTML = `<div style="font-family:'VT323',monospace;font-size:22px;color:var(--amber);letter-spacing:2px;margin-bottom:6px;">${puzzle.operatorData.title}</div>
-    <div style="font-size:12px;color:var(--amber-dim);letter-spacing:1px;margin-bottom:20px;">${puzzle.operatorData.subtitle}</div>`;
-  area.appendChild(hdr);
-  switch(puzzle.type) {
+
+  const header = document.createElement('div');
+  header.innerHTML = `<div style="font-family:'VT323',monospace;font-size:22px;color:var(--amber);letter-spacing:2px;margin-bottom:6px;">${puzzle.data.title}</div>
+  <div style="font-size:12px;color:var(--amber-dim);letter-spacing:1px;margin-bottom:20px;">${puzzle.data.subtitle}</div>`;
+  area.appendChild(header);
+
+  switch (puzzle.type) {
     case 'cross_code':
-    case 'symbol_code':     renderCrossCodeOp(area, puzzle.operatorData); break;
-    case 'mirror_sequence': renderMirrorOp(area, puzzle.operatorData);    break;
-    case 'cipher':          renderCipherOp(area, puzzle.operatorData);    break;
-    case 'calibration':     renderCalibOp(area, puzzle.operatorData);     break;
-    case 'wire_panel':      renderWireOp(area, puzzle.operatorData);      break;
-    case 'final_protocol':  renderFinalOp(area, puzzle.operatorData);     break;
+    case 'symbol_code': renderCrossCodeOp(area, puzzle.data); break;
+    case 'mirror_sequence': renderMirrorOp(area, puzzle.data); break;
+    case 'cipher': renderCipherOp(area, puzzle.data); break;
+    case 'calibration': renderCalibOp(area, puzzle.data); break;
+    case 'final_protocol': renderFinalOp(area, puzzle.data); break;
+    case 'wire_panel': renderWirePanelOp(area, puzzle.data); break;
+    case 'choice': renderChoiceOp(area, puzzle.data); break;
   }
-  statusLog(`Module actif : ${puzzle.module}`, 'var(--green)');
 }
 
-function renderCrossCodeOp(area, d) {
+// Puzzle 1 : numpad pour entrer la séquence (cross_code / symbol_code)
+function renderCrossCodeOp(area, data) {
   const entered = document.createElement('div');
-  entered.id = 'entered-seq'; entered.className = 'current-seq';
+  entered.id = 'entered-seq';
+  entered.className = 'current-seq';
   area.appendChild(entered);
+
   const grid = document.createElement('div');
   grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;';
-  d.buttons.forEach(b => {
+  data.buttons.forEach(b => {
     const btn = document.createElement('button');
-    btn.className = 'num-btn'; btn.style.width='60px'; btn.textContent = b;
+    btn.className = 'num-btn';
+    btn.style.width = '60px';
+    btn.textContent = b;
     btn.onclick = () => {
       seqState.push(b);
-      const chip = document.createElement('span'); chip.className='seq-chip'; chip.textContent=b;
+      const chip = document.createElement('span');
+      chip.className = 'seq-chip';
+      chip.textContent = b;
       entered.appendChild(chip);
-      statusLog(`Touche : ${b}`, 'var(--amber)');
+      statusLog(`Touche pressée : ${b}`, 'var(--amber)');
     };
     grid.appendChild(btn);
   });
   area.appendChild(grid);
-  const row = document.createElement('div'); row.style.cssText='display:flex;gap:10px;margin-top:10px;';
-  const del = document.createElement('button'); del.className='btn danger'; del.textContent='⌫ EFFACER';
-  del.onclick = () => { seqState.pop(); entered.lastChild && entered.removeChild(entered.lastChild); };
-  const ok = document.createElement('button'); ok.className='btn primary'; ok.textContent='✔ VALIDER';
-  ok.onclick = () => submitAction({ sequence: seqState });
-  row.appendChild(del); row.appendChild(ok); area.appendChild(row);
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:10px;margin-top:10px;';
+
+  const btnDel = document.createElement('button');
+  btnDel.className = 'btn danger';
+  btnDel.textContent = '⌫ EFFACER';
+  btnDel.onclick = () => { seqState.pop(); entered.lastChild && entered.removeChild(entered.lastChild); };
+
+  const btnSend = document.createElement('button');
+  btnSend.className = 'btn primary';
+  btnSend.textContent = '✔ VALIDER SÉQUENCE';
+  btnSend.onclick = () => sendAction({ sequence: seqState });
+
+  row.appendChild(btnDel);
+  row.appendChild(btnSend);
+  area.appendChild(row);
 }
 
-function renderMirrorOp(area, d) {
+// Puzzle 2 : boutons colorés
+function renderMirrorOp(area, data) {
   const pressed = document.createElement('div');
-  pressed.id='mirror-pressed'; pressed.className='current-seq';
+  pressed.id = 'mirror-pressed';
+  pressed.className = 'current-seq';
   area.appendChild(pressed);
-  const grid = document.createElement('div'); grid.style.cssText='display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;';
-  d.buttons.forEach(b => {
-    const btn = document.createElement('button'); btn.className=`seq-btn color-${b.color}`; btn.textContent=b.label;
+
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:flex;flex-wrap:wrap;gap:8px;margin:10px 0;';
+
+  data.buttons.forEach(b => {
+    const btn = document.createElement('button');
+    btn.className = `seq-btn color-${b.color}`;
+    btn.textContent = b.label;
     btn.onclick = () => {
       seqState.push(b.label);
-      const chip = document.createElement('span'); chip.className='seq-chip';
-      chip.style.background=b.color==='rouge'?'#ff4444':b.color==='bleu'?'#4488ff':b.color==='jaune'?'var(--amber)':'var(--green)';
-      chip.textContent=b.label; pressed.appendChild(chip);
+      const chip = document.createElement('span');
+      chip.className = 'seq-chip';
+      chip.style.background = b.color === 'rouge' ? '#ff4444' : b.color === 'bleu' ? '#4488ff' : b.color === 'jaune' ? 'var(--amber)' : 'var(--green)';
+      chip.textContent = b.label;
+      pressed.appendChild(chip);
+      statusLog(`${b.label} activé`, b.color === 'rouge' ? '#ff4444' : 'var(--amber)');
     };
     grid.appendChild(btn);
   });
   area.appendChild(grid);
-  const row = document.createElement('div'); row.style.cssText='display:flex;gap:10px;margin-top:10px;';
-  const del = document.createElement('button'); del.className='btn danger'; del.textContent='⌫ EFFACER';
-  del.onclick = () => { seqState.pop(); pressed.lastChild && pressed.removeChild(pressed.lastChild); };
-  const ok = document.createElement('button'); ok.className='btn primary'; ok.style.cssText='border-color:var(--amber);color:var(--amber);'; ok.textContent='✔ VALIDER';
-  ok.onclick = () => submitAction({ sequence: seqState });
-  row.appendChild(del); row.appendChild(ok); area.appendChild(row);
+
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:10px;margin-top:10px;';
+  const btnDel = document.createElement('button');
+  btnDel.className = 'btn danger';
+  btnDel.textContent = '⌫ EFFACER';
+  btnDel.onclick = () => { seqState.pop(); pressed.lastChild && pressed.removeChild(pressed.lastChild); };
+  const btnSend = document.createElement('button');
+  btnSend.className = 'btn primary';
+  btnSend.style.borderColor = 'var(--amber)'; btnSend.style.color = 'var(--amber)';
+  btnSend.textContent = '✔ VALIDER';
+  btnSend.onclick = () => sendAction({ sequence: seqState });
+  row.appendChild(btnDel);
+  row.appendChild(btnSend);
+  area.appendChild(row);
 }
 
-function renderCipherOp(area, d) {
-  const cipher = document.createElement('div'); cipher.className='cipher-word'; cipher.textContent=d.cipherText;
+// Puzzle 3 : texte chiffré + input
+function renderCipherOp(area, data) {
+  const cipher = document.createElement('div');
+  cipher.className = 'cipher-word';
+  cipher.textContent = data.cipherText;
   area.appendChild(cipher);
-  const wrap = document.createElement('div'); wrap.className='cipher-input-wrap';
-  wrap.innerHTML='<div style="font-size:12px;color:var(--amber-dim);letter-spacing:2px;margin-bottom:10px;">ENTREZ LE MOT DÉCHIFFRÉ :</div>';
-  const inp = document.createElement('input'); inp.type='text'; inp.maxLength=d.inputLength;
-  inp.style.cssText='text-align:center;font-size:28px;letter-spacing:8px;text-transform:uppercase;border-color:var(--amber-dim);color:var(--amber);width:100%;';
-  inp.oninput = () => inp.value=inp.value.toUpperCase();
-  const btn = document.createElement('button'); btn.className='validate-btn'; btn.style.marginTop='14px'; btn.textContent='✔ VALIDER';
-  btn.onclick = () => submitAction({ word: inp.value.trim() });
-  wrap.appendChild(inp); wrap.appendChild(btn); area.appendChild(wrap);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'cipher-input-wrap';
+  wrap.innerHTML = `<div style="font-size:12px;color:var(--amber-dim);letter-spacing:2px;margin-bottom:10px;">ENTREZ LE MOT DÉCHIFFRÉ :</div>`;
+
+  const inp = document.createElement('input');
+  inp.type = 'text';
+  inp.maxLength = data.inputLength;
+  inp.style.cssText = 'text-align:center;font-size:28px;letter-spacing:8px;text-transform:uppercase;border-color:var(--amber-dim);color:var(--amber);width:100%;';
+  inp.oninput = () => { inp.value = inp.value.toUpperCase(); };
+
+  const btn = document.createElement('button');
+  btn.className = 'validate-btn';
+  btn.style.marginTop = '14px';
+  btn.textContent = '✔ VALIDER';
+  btn.onclick = () => sendAction({ word: inp.value.trim() });
+
+  wrap.appendChild(inp);
+  wrap.appendChild(btn);
+  area.appendChild(wrap);
 }
 
-function renderCalibOp(area, d) {
-  d.sliders.forEach((s,i) => {
-    const grp = document.createElement('div'); grp.className='slider-group';
-    grp.innerHTML=`<div class="slider-label"><span>${s.label}</span><span class="slider-val" id="val-${s.id}">50</span></div><input type="range" id="${s.id}" min="${s.min}" max="${s.max}" value="50">`;
+// Puzzle 4 : curseurs
+function renderCalibOp(area, data) {
+  data.sliders.forEach((s) => {
+    const grp = document.createElement('div');
+    grp.className = 'slider-group';
+    grp.innerHTML = `
+      <div class="slider-label">
+        <span>${s.label}</span>
+        <span class="slider-val" id="val-${s.id}">50</span>
+      </div>
+      <input type="range" id="${s.id}" min="${s.min}" max="${s.max}" value="50">
+    `;
     area.appendChild(grp);
     setTimeout(() => {
       const slider = document.getElementById(s.id);
-      const valEl = document.getElementById('val-'+s.id);
-      slider.addEventListener('input', () => { valEl.textContent=slider.value; });
+      const valEl = document.getElementById('val-' + s.id);
+      slider.addEventListener('input', () => {
+        valEl.textContent = slider.value;
+        statusLog(`${s.label} → ${slider.value}`, 'var(--amber)');
+      });
     }, 0);
-  });
-  const btn = document.createElement('button'); btn.className='validate-btn'; btn.textContent='✔ VALIDER CALIBRAGE';
-  btn.onclick = () => { const v=d.sliders.map(s=>parseInt(document.getElementById(s.id).value)); submitAction({values:v}); };
-  area.appendChild(btn);
-}
-
-function renderWireOp(area, d) {
-  const wireColors = ['#ff5555','#5588ff','#55ff55','#ffcc00','#ff8800','#cc88ff'];
-  const hdr = document.createElement('div');
-  hdr.style.cssText = 'font-size:11px;color:var(--amber-dim);letter-spacing:2px;margin-bottom:14px;';
-  hdr.textContent = 'CONNECTEZ CHAQUE FIL AU BON PORT :';
-  area.appendChild(hdr);
-
-  const selections = {};
-  d.wires.forEach((wire, i) => {
-    const row = document.createElement('div');
-    row.style.cssText = 'display:flex;align-items:center;gap:12px;margin-bottom:12px;';
-    const lbl = document.createElement('div');
-    lbl.style.cssText = `min-width:130px;font-size:13px;color:${wireColors[i%wireColors.length]};letter-spacing:1px;font-weight:bold;`;
-    lbl.textContent = wire;
-    const sel = document.createElement('select');
-    sel.style.cssText = 'flex:1;background:var(--panel);border:1px solid var(--border);color:var(--amber);font-family:\'Share Tech Mono\',monospace;font-size:12px;padding:6px;';
-    const def = document.createElement('option');
-    def.value = ''; def.textContent = '— SÉLECTIONNER —';
-    sel.appendChild(def);
-    d.ports.forEach(port => {
-      const opt = document.createElement('option');
-      opt.value = port; opt.textContent = port;
-      sel.appendChild(opt);
-    });
-    sel.onchange = () => { selections[wire] = sel.value; };
-    row.appendChild(lbl); row.appendChild(sel);
-    area.appendChild(row);
   });
 
   const btn = document.createElement('button');
-  btn.className = 'validate-btn'; btn.style.marginTop = '14px';
-  btn.textContent = '✔ VALIDER CÂBLAGE';
+  btn.className = 'validate-btn';
+  btn.textContent = '✔ VALIDER CALIBRAGE';
   btn.onclick = () => {
-    const allSet = d.wires.every(w => selections[w]);
-    if (!allSet) { statusLog('Tous les fils doivent être connectés !', 'var(--red)'); return; }
-    submitAction({ connections: selections });
+    const v = data.sliders.map(s => parseInt(document.getElementById(s.id).value, 10));
+    sendAction({ values: v });
   };
   area.appendChild(btn);
 }
 
-function renderFinalOp(area, d) {
-  const grid = document.createElement('div'); grid.style.cssText='display:flex;flex-direction:column;gap:14px;';
+// Puzzle 5 : protocole final
+function renderFinalOp(area, data) {
+  const grid = document.createElement('div');
+  grid.style.cssText = 'display:flex;flex-direction:column;gap:14px;';
 
-  // Switches
-  const swGrp = document.createElement('div');
-  swGrp.innerHTML='<div style="font-size:11px;color:var(--amber-dim);letter-spacing:2px;margin-bottom:8px;">INTERRUPTEURS</div>';
-  const swRow = document.createElement('div'); swRow.className='switch-group';
-  d.controls.filter(c=>c.type==='switch').forEach(c => {
-    const btn = document.createElement('button'); btn.className='switch-btn'; btn.dataset.color=c.color; btn.id=c.id; btn.textContent=c.label;
-    btn.onclick = () => { document.querySelectorAll('.switch-btn').forEach(b=>b.classList.remove('active')); btn.classList.add('active'); finalState.switch=c.id; };
-    swRow.appendChild(btn);
-  });
-  swGrp.appendChild(swRow); grid.appendChild(swGrp);
-
-  // Numpad
-  const numGrp = document.createElement('div');
-  numGrp.innerHTML='<div style="font-size:11px;color:var(--amber-dim);letter-spacing:2px;margin-bottom:8px;">CODE D\'ACCÈS</div>';
-  const disp = document.createElement('div'); disp.className='num-display'; disp.id='fnumdisp'; disp.textContent='';
-  numGrp.appendChild(disp);
-  const numGrid = document.createElement('div'); numGrid.className='numpad-grid';
-  ['7','8','9','4','5','6','1','2','3','⌫','0','—'].forEach(k => {
-    const btn = document.createElement('button'); btn.className='num-btn'; btn.textContent=k;
+  const switchGrp = document.createElement('div');
+  switchGrp.innerHTML = '<div style="font-size:11px;color:var(--amber-dim);letter-spacing:2px;margin-bottom:8px;">INTERRUPTEURS</div>';
+  const switchRow = document.createElement('div');
+  switchRow.className = 'switch-group';
+  data.controls.filter(c => c.type === 'switch').forEach(c => {
+    const btn = document.createElement('button');
+    btn.className = 'switch-btn';
+    btn.dataset.color = c.color;
+    btn.id = c.id;
+    btn.textContent = c.label;
     btn.onclick = () => {
-      if (k==='⌫') { finalState.code=finalState.code.slice(0,-1); }
-      else if (k!=='—' && finalState.code.length<6) { finalState.code+=k; }
-      document.getElementById('fnumdisp').textContent=finalState.code;
+      document.querySelectorAll('.switch-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      finalState.switch = c.id;
+      statusLog(`Interrupteur ${c.label} activé`, 'var(--amber)');
+    };
+    switchRow.appendChild(btn);
+  });
+  switchGrp.appendChild(switchRow);
+  grid.appendChild(switchGrp);
+
+  const numGrp = document.createElement('div');
+  numGrp.innerHTML = '<div style="font-size:11px;color:var(--amber-dim);letter-spacing:2px;margin-bottom:8px;">CODE D\'ACCÈS</div>';
+  const display = document.createElement('div');
+  display.className = 'num-display';
+  display.id = 'final-numdisp';
+  display.textContent = '';
+  numGrp.appendChild(display);
+  const numGrid = document.createElement('div');
+  numGrid.className = 'numpad-grid';
+  ['7', '8', '9', '4', '5', '6', '1', '2', '3', '⌫', '0', '✔'].forEach(k => {
+    const btn = document.createElement('button');
+    btn.className = 'num-btn';
+    btn.textContent = k;
+    btn.onclick = () => {
+      if (k === '⌫') { finalState.code = finalState.code.slice(0, -1); }
+      else if (k === '✔') { /* ignore, validate button handles */ }
+      else if (finalState.code.length < 6) { finalState.code += k; }
+      document.getElementById('final-numdisp').textContent = finalState.code;
+      statusLog(`Code → ${finalState.code}`, 'var(--amber)');
     };
     numGrid.appendChild(btn);
   });
-  numGrp.appendChild(numGrid); grid.appendChild(numGrp);
+  numGrp.appendChild(numGrid);
+  grid.appendChild(numGrp);
 
-  // Levers
-  const levGrp = document.createElement('div');
-  levGrp.innerHTML='<div style="font-size:11px;color:var(--amber-dim);letter-spacing:2px;margin-bottom:8px;">LEVIERS</div>';
-  const levRow = document.createElement('div'); levRow.className='levers-group';
-  d.controls.filter(c=>c.type==='lever').forEach(c => {
-    const btn = document.createElement('button'); btn.className='lever-btn'; btn.id=c.id; btn.textContent=c.label;
+  const leverGrp = document.createElement('div');
+  leverGrp.innerHTML = '<div style="font-size:11px;color:var(--amber-dim);letter-spacing:2px;margin-bottom:8px;">LEVIERS</div>';
+  const leverRow = document.createElement('div');
+  leverRow.className = 'levers-group';
+  data.controls.filter(c => c.type === 'lever').forEach(c => {
+    const btn = document.createElement('button');
+    btn.className = 'lever-btn';
+    btn.id = c.id;
+    btn.textContent = c.label;
     btn.onclick = () => {
-      if (!finalState.levers.includes(c.id)) { finalState.levers.push(c.id); btn.classList.add('active'); }
-      else { finalState.levers=finalState.levers.filter(l=>l!==c.id); btn.classList.remove('active'); }
+      if (!finalState.levers.includes(c.id)) {
+        finalState.levers.push(c.id);
+        btn.classList.add('active');
+        statusLog(`${c.label} activé`, 'var(--amber)');
+      } else {
+        finalState.levers = finalState.levers.filter(l => l !== c.id);
+        btn.classList.remove('active');
+      }
     };
-    levRow.appendChild(btn);
+    leverRow.appendChild(btn);
   });
-  levGrp.appendChild(levRow); grid.appendChild(levGrp);
+  leverGrp.appendChild(leverRow);
+  grid.appendChild(leverGrp);
+
   area.appendChild(grid);
 
-  const validateBtn = document.createElement('button'); validateBtn.className='validate-btn'; validateBtn.style.marginTop='20px'; validateBtn.textContent='🔴 VALIDATION FINALE';
-  validateBtn.onclick = () => { finalState.validate=true; submitAction({ finalState }); };
+  const validateBtn = document.createElement('button');
+  validateBtn.className = 'validate-btn';
+  validateBtn.style.marginTop = '20px';
+  validateBtn.textContent = '🔴 VALIDATION FINALE';
+  validateBtn.onclick = () => {
+    finalState.validate = true;
+    sendAction({ finalState });
+    statusLog('Validation envoyée !', 'var(--green)');
+  };
   area.appendChild(validateBtn);
 }
 
-// ── Firebase listeners ──
-function setupListeners() {
-  let introShown = false;
-  let pauseStartTime = null;
+// Puzzle 6 : panneau de câblage (wire_panel)
+function renderWirePanelOp(area, data) {
+  const connDisplay = document.createElement('div');
+  connDisplay.className = 'wire-connections';
+  connDisplay.id = 'wire-connections-display';
+  area.appendChild(connDisplay);
 
-  function pauseTimer() {
-    clearInterval(timerInterval);
-    pauseStartTime = Date.now();
+  function refreshConnDisplay() {
+    connDisplay.innerHTML = wireConnections.length
+      ? wireConnections.map(c => `<span class="conn-chip">${c.wire} → ${c.port}</span>`).join('')
+      : '<span style="color:var(--amber-dim);">Aucune connexion établie</span>';
   }
-  function resumeTimer() {
-    if (pauseStartTime) {
-      startTimestamp += (Date.now() - pauseStartTime);
-      pauseStartTime = null;
-    }
-    if (startTimestamp) startTimerLoop();
-  }
+  refreshConnDisplay();
 
-  GameDB.onStateChange(state => {
-    if (state.phase === 'playing') {
-      if (!introShown && state.startTimestamp) {
-        introShown = true;
-        if (state.timeLimit) timeLimit = state.timeLimit;
-        document.getElementById('wait-overlay').style.display = 'none';
-        document.getElementById('game-area').style.display = 'grid';
-        if (state.puzzlesSeed && PUZZLES.length === 0) initPuzzles(state.puzzlesSeed);
-        startTimestamp = state.startTimestamp;
-        startTimerLoop();
-        AudioManager.gameStart();
-        Scenario.play('intro', () => { resumeTimer(); showPuzzle(0); },
-          { isController: false, onStart: pauseTimer });
+  const grid = document.createElement('div');
+  grid.className = 'wire-panel-grid';
+
+  const wireCol = document.createElement('div');
+  wireCol.className = 'wire-col';
+  const wireBtns = {};
+  data.wires.forEach(w => {
+    const btn = document.createElement('button');
+    btn.className = 'wire-btn';
+    btn.textContent = w;
+    btn.onclick = () => {
+      // Débrancher si déjà connecté
+      const existing = wireConnections.find(c => c.wire === w);
+      if (existing) {
+        wireConnections = wireConnections.filter(c => c.wire !== w);
+        btn.classList.remove('connected');
+        refreshConnDisplay();
+        refreshPorts();
+        statusLog(`${w} débranché`, 'var(--amber)');
         return;
       }
-
-      const newIdx = state.currentPuzzle || 0;
-      if (newIdx !== lastPuzzleIndex && lastPuzzleIndex >= 0 && newIdx > 0) {
-        AudioManager.puzzleNext();
-        Scenario.play('cutscene_' + lastPuzzleIndex,
-          () => { resumeTimer(); showPuzzle(newIdx); },
-          { isController: false, onStart: pauseTimer });
-        return;
-      }
-      if (newIdx !== lastPuzzleIndex) showPuzzle(newIdx);
-    }
-
-    if (state.phase === 'finished') {
-      clearInterval(timerInterval);
-      AudioManager.stopAlarm();
-      const outroId = state.win ? 'outro_win' : 'outro_lose';
-      state.win ? AudioManager.victory() : AudioManager.defeat();
-      Scenario.play(outroId, () => {
-        const overlay = document.getElementById('end-overlay');
-        const card    = document.getElementById('end-card');
-        overlay.classList.add('visible');
-        card.className = state.win ? 'win' : 'lose';
-        document.getElementById('end-title').textContent  = state.win ? '🏆 VICTOIRE' : '💀 DÉFAITE';
-        document.getElementById('end-reason').textContent = state.reason;
-      }, { isController: false });
-    }
+      document.querySelectorAll('.wire-btn').forEach(b => b.classList.remove('selected'));
+      wireSelected = w;
+      btn.classList.add('selected');
+      statusLog(`Fil ${w} sélectionné — choisissez un port`, 'var(--amber)');
+    };
+    wireBtns[w] = btn;
+    wireCol.appendChild(btn);
   });
+  grid.appendChild(wireCol);
 
-  GameDB.onResult(result => {
-    if (result.valid) { AudioManager.success(); showNotif('✅ ' + result.message, 'success'); statusLog(result.message, 'var(--green)'); }
-    else              { AudioManager.error();   showNotif('❌ ' + result.message, 'error');   statusLog(result.message, 'var(--red)'); }
+  const portCol = document.createElement('div');
+  portCol.className = 'port-col';
+  const portBtns = {};
+  function refreshPorts() {
+    data.ports.forEach(p => {
+      const taken = wireConnections.some(c => c.port === p);
+      portBtns[p].classList.toggle('taken', taken);
+    });
+  }
+  data.ports.forEach(p => {
+    const btn = document.createElement('button');
+    btn.className = 'port-btn';
+    btn.textContent = p;
+    btn.onclick = () => {
+      if (!wireSelected) { statusLog('Sélectionnez un fil en premier', 'var(--red)'); return; }
+      if (wireConnections.some(c => c.port === p)) { statusLog('Port déjà utilisé', 'var(--red)'); return; }
+      wireConnections.push({ wire: wireSelected, port: p });
+      wireBtns[wireSelected].classList.remove('selected');
+      wireBtns[wireSelected].classList.add('connected');
+      statusLog(`${wireSelected} connecté à ${p}`, 'var(--green)');
+      wireSelected = null;
+      refreshConnDisplay();
+      refreshPorts();
+    };
+    portBtns[p] = btn;
+    portCol.appendChild(btn);
   });
+  grid.appendChild(portCol);
+  area.appendChild(grid);
 
-  GameDB.onDisconnect(() => {
-    AudioManager.disconnect();
-    showNotif('⚠ Le Technicien s\'est déconnecté', 'error');
-  });
+  const btn = document.createElement('button');
+  btn.className = 'validate-btn';
+  btn.textContent = '✔ VALIDER LE CÂBLAGE';
+  btn.onclick = () => sendAction({ connections: wireConnections });
+  area.appendChild(btn);
 }
+
+// Puzzle 7 : décision (choice)
+function renderChoiceOp(area, data) {
+  const group = document.createElement('div');
+  group.className = 'choice-btn-group';
+  data.options.forEach(o => {
+    const btn = document.createElement('button');
+    btn.className = 'choice-btn';
+    btn.textContent = o.label;
+    btn.onclick = () => {
+      document.querySelectorAll('.choice-btn').forEach(b => b.classList.remove('chosen'));
+      btn.classList.add('chosen');
+      statusLog(`Décision sélectionnée : ${o.label}`, 'var(--green)');
+      sendAction({ optionId: o.id });
+    };
+    group.appendChild(btn);
+  });
+  area.appendChild(group);
+}
+
+// ── Application de l'état de mission (démarrage ou reprise) ──
+function applyMissionState(msg) {
+  document.getElementById('wait-overlay').style.display = 'none';
+  document.getElementById('game-area').style.display = 'grid';
+  puzzleIndex = msg.puzzleIndex;
+  totalPuzzles = msg.totalPuzzles;
+  if (msg.mission) setMissionBanner(msg.mission);
+  document.getElementById('module-name').textContent = msg.puzzle.module;
+  document.getElementById('footer-status').textContent = `PUZZLE ${puzzleIndex + 1}/${totalPuzzles}`;
+  buildDots(totalPuzzles, puzzleIndex);
+  renderPuzzle(msg.puzzle);
+  if (msg.resources) { lastResources = { ...msg.resources }; }
+  setTimer(msg.timeLeft);
+}
+
+// ── WS Events ──
+WS.on('hub:state', () => {
+  window.location.href = 'hub.html';
+});
+
+WS.on('session:expired', () => {
+  sessionStorage.clear();
+  window.location.href = 'index.html';
+});
+
+WS.on('mission:resume', (msg) => {
+  applyMissionState(msg);
+  statusLog(`Session reprise — ${msg.puzzle.module}`, 'var(--green)');
+});
+
+WS.on('mission:started', (msg) => {
+  applyMissionState(msg);
+  statusLog(`Mission démarrée — ${msg.puzzle.module}`, 'var(--green)');
+});
+
+WS.on('puzzle:next', (msg) => {
+  puzzleIndex = msg.puzzleIndex;
+  document.getElementById('module-name').textContent = msg.module;
+  document.getElementById('footer-status').textContent = `PUZZLE ${puzzleIndex + 1}/${totalPuzzles}`;
+  buildDots(totalPuzzles, puzzleIndex);
+  renderPuzzle(msg.puzzle);
+  statusLog(`Nouveau module : ${msg.module}`, 'var(--green)');
+});
+
+WS.on('puzzle:solved', (msg) => {
+  showNotif('✅ ' + msg.message, 'success');
+  statusLog(msg.message, 'var(--green)');
+  if (msg.resources) logResourceDiff(msg.resources);
+});
+
+WS.on('puzzle:failed', (msg) => {
+  showNotif('❌ ' + msg.message, 'error');
+  statusLog(msg.message, 'var(--red)');
+});
+
+WS.on('hint:response', (msg) => {
+  if (msg.text) {
+    statusLog('💡 ' + msg.text, 'var(--green)');
+    showNotif('💡 Indice reçu', 'success');
+  } else {
+    showNotif(msg.message || 'Aucun indice disponible', 'error');
+  }
+});
+
+WS.on('timer', (msg) => { setTimer(msg.timeLeft); });
+
+WS.on('game:over', (msg) => {
+  if (msg.win) return;
+  const overlay = document.getElementById('end-overlay');
+  const card = document.getElementById('end-card');
+  overlay.classList.add('visible');
+  card.className = 'lose';
+  document.getElementById('end-title').textContent = '💀 DÉFAITE';
+  document.getElementById('end-reason').textContent = msg.reason;
+  document.getElementById('end-debrief').textContent = msg.debrief || '';
+});
+
+WS.on('mission:complete', (msg) => {
+  const overlay = document.getElementById('mission-complete-overlay');
+  overlay.classList.add('visible');
+  document.getElementById('mc-stars').textContent = '★'.repeat(msg.stars) + '☆'.repeat(3 - msg.stars);
+  document.getElementById('mc-debrief').textContent = msg.debrief;
+  const endingEl = document.getElementById('mc-ending');
+  if (msg.ending) {
+    endingEl.style.display = 'block';
+    endingEl.textContent = `🏁 FIN DE CAMPAGNE : ${msg.ending.title} — ${msg.ending.text}`;
+  } else {
+    endingEl.style.display = 'none';
+  }
+  statusLog('Mission accomplie ! Station réactivée.', 'var(--green)');
+});
+
+WS.on('mission:aborted', () => {
+  window.location.href = 'hub.html';
+});
+
+WS.on('player:disconnected', () => {
+  showNotif('⚠ Le Technicien s\'est déconnecté', 'error');
+});
+
+WS.on('player:reconnected', () => {
+  showNotif('✅ Le Technicien est reconnecté', 'success');
+});
+
+WS.on('error', (msg) => {
+  showNotif('⚠ ' + msg.message, 'error');
+});
+
+// ── Actions locales ──
+document.getElementById('btn-hub').addEventListener('click', () => { location.href = 'hub.html'; });
+document.getElementById('btn-end-hub').addEventListener('click', () => { location.href = 'hub.html'; });
+document.getElementById('btn-hint').addEventListener('click', () => { WS.send({ type: 'hint:request' }); });
+document.getElementById('btn-abandon').addEventListener('click', () => {
+  if (confirm('Abandonner la mission en cours et revenir au Hub ?')) {
+    WS.send({ type: 'hub:return' });
+  }
+});

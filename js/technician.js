@@ -1,40 +1,36 @@
-// ── Init ──
 const role = 'technician';
-let timerInterval = null;
-let startTimestamp = null;
-let lastPuzzleIndex = -1;
+const RESOURCE_LABELS = { integrity: 'INTÉGRITÉ', trust: 'CONFIANCE', intel: 'RENSEIGNEMENT' };
 
-GameDB.init();
-
+let currentPuzzle = null;
+let totalPuzzles = 1;
+let puzzleIndex = 0;
+let lastResources = null;
 const roomCode = sessionStorage.getItem('sz_room');
+
 if (!roomCode) { location.href = 'index.html'; }
 
-// Rétablir la présence Firebase et attendre avant de setup les listeners
-GameDB.rejoinRoom(roomCode, 'technician').then(() => {
-  AudioManager.init();
-  AudioManager.boot();
-  // Technicien = contrôleur des cinématiques
-  Scenario.initSync(
-    (sceneId, lineIdx) => GameDB.setCinematicLine(sceneId, lineIdx),
-    (sceneId, cb)      => GameDB.onCinematicLine(sceneId, cb)
-  );
-  VoiceChat.init('technician', roomCode, GameDB.getDb());
-  setupListeners();
+Chat.init(role);
+
+WS.connect(() => {
+  StationAuth.currentUser().then(user => {
+    if (!user) { location.href = 'index.html'; return; }
+    WS.send({ type: 'session:resume', code: roomCode, role, userId: user.uid });
+  }).catch(() => { location.href = 'index.html'; });
 });
 
-// ── UI Helpers ──
-function log(text, type='info') {
+// ── Helpers UI ──
+function log(text, type = 'info') {
   const el = document.getElementById('log-content');
-  const c = {info:'var(--green-dim)',ok:'var(--green)',error:'var(--red)',warn:'var(--amber)'};
-  const p = {info:'[SYS]',ok:'[OK] ',error:'[ERR]',warn:'[WRN]'};
-  const d = document.createElement('div');
-  d.style.color = c[type]||c.info;
-  d.textContent = `${p[type]||'[SYS]'} ${text}`;
-  el.appendChild(d);
+  const colors = { info: 'var(--green-dim)', ok: 'var(--green)', error: 'var(--red)', warn: 'var(--amber)' };
+  const prefix = { info: '[SYS]', ok: '[OK] ', error: '[ERR]', warn: '[WRN]' };
+  const line = document.createElement('div');
+  line.style.color = colors[type] || colors.info;
+  line.textContent = `${prefix[type] || '[SYS]'} ${text}`;
+  el.appendChild(line);
   el.parentElement.scrollTop = el.parentElement.scrollHeight;
 }
 
-function showNotif(text, type='success') {
+function showNotif(text, type = 'success') {
   const n = document.createElement('div');
   n.className = `notif ${type}`;
   n.textContent = text;
@@ -43,238 +39,297 @@ function showNotif(text, type='success') {
 }
 
 function setTimer(seconds) {
-  const m = String(Math.floor(seconds/60)).padStart(2,'0');
-  const s = String(seconds%60).padStart(2,'0');
+  const m = String(Math.floor(seconds / 60)).padStart(2, '0');
+  const s = String(seconds % 60).padStart(2, '0');
   const el = document.getElementById('timer-display');
   el.textContent = `${m}:${s}`;
-  el.className = seconds<=60 ? 'danger' : seconds<=180 ? 'warning' : '';
+  el.className = seconds <= 60 ? 'danger' : seconds <= 180 ? 'warning' : '';
 }
 
 function buildDots(total, current) {
   const el = document.getElementById('puzzle-dots');
   el.innerHTML = '';
-  for (let i=0; i<total; i++) {
+  for (let i = 0; i < total; i++) {
     const d = document.createElement('div');
-    d.className = 'progress-dot'+(i<current?' done':i===current?' current':'');
+    d.className = 'progress-dot' + (i < current ? ' done' : i === current ? ' current' : '');
     el.appendChild(d);
   }
 }
 
-let timeLimit = 900;
-
-// ...existing code...
-
-function startTimerLoop() {
-  clearInterval(timerInterval);
-  timerInterval = setInterval(() => {
-    if (!startTimestamp) return;
-    const elapsed = Math.floor((Date.now() - startTimestamp) / 1000);
-    const left = timeLimit - elapsed;
-    if (left <= 0) {
-      clearInterval(timerInterval);
-      setTimer(0);
-      AudioManager.stopAlarm();
-      GameDB.triggerTimeout();
-    } else {
-      setTimer(left);
-      if (left === 60) AudioManager.startAlarm();
-      if (left <= 10)  AudioManager.countdownUrgent();
-      else if (left <= 30 && left % 5 === 0) AudioManager.countdown();
+function logResourceDiff(resources) {
+  if (!lastResources) { lastResources = { ...resources }; return; }
+  Object.keys(resources).forEach(key => {
+    const delta = resources[key] - lastResources[key];
+    if (delta !== 0) {
+      const label = RESOURCE_LABELS[key] || key.toUpperCase();
+      log(`${label} ${delta > 0 ? '+' : ''}${delta} (→ ${resources[key]})`, delta > 0 ? 'ok' : 'warn');
     }
-  }, 1000);
+  });
+  lastResources = { ...resources };
 }
 
-// ── Puzzle renderers ──
+function setMissionBanner(mission) {
+  const el = document.getElementById('mission-banner');
+  el.innerHTML = `<span class="mb-title">${mission.icon || ''} ${mission.title}</span>${mission.briefing}`;
+}
+
+// ── Rendu des puzzles ──
 function renderPuzzle(puzzle) {
+  currentPuzzle = puzzle;
   const panel = document.getElementById('puzzle-info');
   panel.innerHTML = '';
-  const hdr = document.createElement('div');
-  hdr.innerHTML = `<div style="font-family:'VT323',monospace;font-size:22px;color:var(--amber);letter-spacing:2px;margin-bottom:6px;">${puzzle.data.title}</div>
-    <div style="font-size:12px;color:var(--green-dim);letter-spacing:1px;margin-bottom:20px;">${puzzle.data.subtitle}</div>`;
-  panel.appendChild(hdr);
-  switch(puzzle.type) {
-    case 'cross_code':      renderCrossCode(panel, puzzle.data);    break;
-    case 'symbol_code':     renderCrossCode(panel, puzzle.data);    break;
-    case 'mirror_sequence': renderMirrorSeq(panel, puzzle.data);    break;
-    case 'cipher':          renderCipher(panel, puzzle.data);       break;
-    case 'calibration':     renderCalib(panel, puzzle.data);        break;
-    case 'wire_panel':      renderWirePanel(panel, puzzle.data);    break;
-    case 'final_protocol':  renderFinal(panel, puzzle.data);        break;
+
+  const title = document.createElement('div');
+  title.innerHTML = `<div style="font-family:'VT323',monospace;font-size:22px;color:var(--amber);letter-spacing:2px;margin-bottom:6px;">${puzzle.data.title}</div>
+  <div style="font-size:12px;color:var(--green-dim);letter-spacing:1px;margin-bottom:20px;">${puzzle.data.subtitle}</div>`;
+  panel.appendChild(title);
+
+  switch (puzzle.type) {
+    case 'cross_code':
+    case 'symbol_code': renderCrossCode(panel, puzzle.data); break;
+    case 'mirror_sequence': renderMirrorSeq(panel, puzzle.data); break;
+    case 'cipher': renderCipher(panel, puzzle.data); break;
+    case 'calibration': renderCalibration(panel, puzzle.data); break;
+    case 'final_protocol': renderFinalProtocol(panel, puzzle.data); break;
+    case 'wire_panel': renderWirePanel(panel, puzzle.data); break;
+    case 'choice': renderChoice(panel, puzzle.data); break;
   }
+
+  const hintBox = document.createElement('div');
+  hintBox.id = 'hint-container';
+  panel.appendChild(hintBox);
 }
 
-function renderCrossCode(p, d) {
+function renderCrossCode(panel, data) {
   const tbl = document.createElement('table');
   tbl.className = 'mapping-table';
-  tbl.innerHTML = '<tr><th style="color:var(--amber);text-align:left;padding:6px 14px;border:1px solid var(--border)">SYMBOLE</th><th style="color:var(--green);text-align:left;padding:6px 14px;border:1px solid var(--border)">CODE</th></tr>';
-  Object.entries(d.mapping).forEach(([sym,code]) => {
+  tbl.innerHTML = '<tr><th style="color:var(--amber);text-align:left;padding:6px 14px;border:1px solid var(--border);">SYMBOLE</th><th style="color:var(--green);text-align:left;padding:6px 14px;border:1px solid var(--border);">CODE</th></tr>';
+  Object.entries(data.mapping).forEach(([sym, code]) => {
     const tr = document.createElement('tr');
     tr.innerHTML = `<td>${sym}</td><td>${code}</td>`;
     tbl.appendChild(tr);
   });
-  p.appendChild(tbl);
+  panel.appendChild(tbl);
+
   const seqDiv = document.createElement('div');
-  seqDiv.style.marginTop='20px';
-  seqDiv.innerHTML = '<div style="font-size:12px;color:var(--green-dim);letter-spacing:2px;margin-bottom:10px;">SÉQUENCE À COMMUNIQUER :</div>';
-  d.sequence.forEach((sym,i) => {
+  seqDiv.style.marginTop = '20px';
+  seqDiv.innerHTML = `<div style="font-size:12px;color:var(--green-dim);letter-spacing:2px;margin-bottom:10px;">SÉQUENCE À COMMUNIQUER :</div>`;
+  data.sequence.forEach((sym, i) => {
     const sp = document.createElement('span');
     sp.className = 'seq-item';
-    sp.innerHTML = `<span style="color:var(--green-dim);font-size:12px;">${i+1}.</span> ${sym}`;
+    sp.innerHTML = `<span style="color:var(--green-dim);font-size:12px;">${i + 1}.</span> ${sym}`;
     seqDiv.appendChild(sp);
   });
-  p.appendChild(seqDiv);
+  panel.appendChild(seqDiv);
 }
 
-function renderMirrorSeq(p, d) {
+function renderMirrorSeq(panel, data) {
   const div = document.createElement('div');
   div.innerHTML = '<div style="font-size:12px;color:var(--green-dim);letter-spacing:2px;margin-bottom:10px;">ACTIVEZ DANS CET ORDRE :</div>';
-  d.sequence.forEach((color,i) => {
+  data.sequence.forEach((color, i) => {
     const sp = document.createElement('span');
     sp.className = `seq-item color-${color}`;
-    sp.innerHTML = `<span style="font-size:12px;">${i+1}.</span> ${color.toUpperCase()}`;
+    sp.innerHTML = `<span style="font-size:12px;">${i + 1}.</span> ${color.toUpperCase()}`;
     div.appendChild(sp);
   });
-  p.appendChild(div);
+  panel.appendChild(div);
 }
 
-function renderCipher(p, d) {
+function renderCipher(panel, data) {
   const div = document.createElement('div');
   div.innerHTML = '<div style="font-size:12px;color:var(--green-dim);letter-spacing:2px;margin-bottom:10px;">CLÉ : CHIFFRÉ → ORIGINAL</div>';
   const grid = document.createElement('div');
   grid.className = 'cipher-key';
-  Object.entries(d.key).forEach(([plain, enc]) => {
+  Object.entries(data.key).forEach(([plain, enc]) => {
     const pair = document.createElement('div');
     pair.className = 'cipher-pair';
     pair.innerHTML = `<div class="enc">${enc}</div><div class="plain">${plain}</div>`;
     grid.appendChild(pair);
   });
   div.appendChild(grid);
-  p.appendChild(div);
+  panel.appendChild(div);
 }
 
-function renderCalib(p, d) {
+function renderCalibration(panel, data) {
   const div = document.createElement('div');
-  d.targets.forEach(t => {
+  data.targets.forEach(t => {
     const item = document.createElement('div');
     item.className = 'target-item';
     item.innerHTML = `<div class="t-name">${t.name}</div><div><span class="t-val">${t.value}</span><span class="t-unit">${t.unit}</span></div>`;
     div.appendChild(item);
   });
-  p.appendChild(div);
-  log(`Calibrage requis: ${d.targets.map(t=>`${t.name}=${t.value}${t.unit}`).join(', ')}`, 'warn');
+  panel.appendChild(div);
+  log(`Calibrage requis: ${data.targets.map(t => `${t.name}=${t.value}${t.unit}`).join(', ')}`, 'warn');
 }
 
-function renderFinal(p, d) {
+function renderFinalProtocol(panel, data) {
   const div = document.createElement('div');
-  d.steps.forEach((s,i) => {
+  data.steps.forEach((s, i) => {
     const item = document.createElement('div');
-    item.className = 'step-item'+(i===0?' active':'');
+    item.className = 'step-item' + (i === 0 ? ' active' : '');
     item.id = `step-${i}`;
     item.innerHTML = `<div class="step-num">ÉTAPE ${s.order}</div><div class="step-txt">${s.instruction}</div>`;
     div.appendChild(item);
   });
-  p.appendChild(div);
+  panel.appendChild(div);
+  log('Protocole final initialisé. Lisez les étapes à l\'Opérateur.', 'warn');
 }
 
-function renderWirePanel(p, d) {
-  const wireColors = ['#ff5555','#5588ff','#55ff55','#ffcc00','#ff8800','#cc88ff'];
-  const div = document.createElement('div');
-  div.innerHTML = '<div style="font-size:12px;color:var(--green-dim);letter-spacing:2px;margin-bottom:14px;">DICTEZ CES CONNEXIONS :</div>';
+function renderWirePanel(panel, data) {
+  const intro = document.createElement('div');
+  intro.style.cssText = 'font-size:12px;color:var(--green-dim);letter-spacing:2px;margin-bottom:10px;';
+  intro.textContent = 'SCHÉMA DE CÂBLAGE — DICTEZ CHAQUE PAIRE :';
+  panel.appendChild(intro);
+
   const tbl = document.createElement('table');
   tbl.className = 'mapping-table';
-  tbl.innerHTML = '<tr><th style="color:var(--amber)">FIL</th><th style="color:var(--green)">→ PORT</th></tr>';
-  d.connections.forEach((c, i) => {
+  tbl.innerHTML = '<tr><th style="color:var(--amber);text-align:left;padding:6px 14px;border:1px solid var(--border);">FIL</th><th style="color:var(--green);text-align:left;padding:6px 14px;border:1px solid var(--border);">PORT</th></tr>';
+  data.schema.forEach(({ wire, port }) => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td style="color:${wireColors[i%wireColors.length]};font-weight:bold;">${c.wire}</td><td style="color:var(--amber)">${c.port}</td>`;
+    tr.innerHTML = `<td>${wire}</td><td>${port}</td>`;
     tbl.appendChild(tr);
   });
-  div.appendChild(tbl);
-  p.appendChild(div);
+  panel.appendChild(tbl);
 }
 
-function showPuzzle(index) {
-  if (index === lastPuzzleIndex) return;
-  lastPuzzleIndex = index;
-  const puzzle = PUZZLES[index];
-  document.getElementById('module-name').textContent = puzzle.module;
-  document.getElementById('footer-status').textContent = `PUZZLE ${index+1}/${PUZZLES.length}`;
-  buildDots(PUZZLES.length, index);
-  renderPuzzle({ type: puzzle.type, data: puzzle.technicianData });
-  log(`Module actif : ${puzzle.module}`, 'ok');
+function renderChoice(panel, data) {
+  const narrative = document.createElement('div');
+  narrative.className = 'choice-narrative';
+  narrative.textContent = data.narrative;
+  panel.appendChild(narrative);
+
+  const list = document.createElement('div');
+  data.options.forEach(o => {
+    const row = document.createElement('div');
+    row.className = 'choice-option-row';
+    row.innerHTML = `<span class="opt-label">${o.label}</span><span class="opt-hint">${o.hint || ''}</span>`;
+    list.appendChild(row);
+  });
+  panel.appendChild(list);
+  log('Décision requise : discutez avec l\'Opérateur avant validation.', 'warn');
 }
 
-function setupListeners() {
-  let introShown = false;
-  let pauseStartTime = null;
+// ── Application de l'état de mission (démarrage ou reprise) ──
+function applyMissionState(msg) {
+  document.getElementById('start-overlay').style.display = 'none';
+  document.getElementById('game-area').style.display = 'grid';
+  puzzleIndex = msg.puzzleIndex;
+  totalPuzzles = msg.totalPuzzles;
+  if (msg.mission) setMissionBanner(msg.mission);
+  document.getElementById('module-name').textContent = msg.puzzle.module;
+  document.getElementById('footer-status').textContent = `PUZZLE ${puzzleIndex + 1}/${totalPuzzles}`;
+  buildDots(totalPuzzles, puzzleIndex);
+  renderPuzzle(msg.puzzle);
+  if (msg.resources) { lastResources = { ...msg.resources }; }
+  setTimer(msg.timeLeft);
+}
 
-  function pauseTimer() {
-    clearInterval(timerInterval);
-    pauseStartTime = Date.now();
+// ── Events WebSocket ──
+WS.on('hub:state', () => {
+  // Pas de mission en cours pour cette room : retour au hub.
+  window.location.href = 'hub.html';
+});
+
+WS.on('session:expired', () => {
+  sessionStorage.clear();
+  window.location.href = 'index.html';
+});
+
+WS.on('mission:resume', (msg) => {
+  applyMissionState(msg);
+  log(`Session reprise — ${msg.puzzle.module}`, 'ok');
+});
+
+WS.on('mission:started', (msg) => {
+  applyMissionState(msg);
+  log(`Mission démarrée — ${msg.puzzle.module}`, 'ok');
+});
+
+WS.on('puzzle:next', (msg) => {
+  puzzleIndex = msg.puzzleIndex;
+  document.getElementById('module-name').textContent = msg.module;
+  document.getElementById('footer-status').textContent = `PUZZLE ${puzzleIndex + 1}/${totalPuzzles}`;
+  buildDots(totalPuzzles, puzzleIndex);
+  renderPuzzle(msg.puzzle);
+  log(`Nouveau module : ${msg.module}`, 'ok');
+});
+
+WS.on('puzzle:solved', (msg) => {
+  showNotif('✅ ' + msg.message, 'success');
+  log(msg.message, 'ok');
+  if (msg.resources) logResourceDiff(msg.resources);
+});
+
+WS.on('puzzle:failed', (msg) => {
+  showNotif('❌ ' + msg.message, 'error');
+  log(msg.message, 'error');
+});
+
+WS.on('hint:response', (msg) => {
+  const container = document.getElementById('hint-container');
+  if (!container) return;
+  if (msg.text) {
+    const box = document.createElement('div');
+    box.className = 'hint-box';
+    box.textContent = '💡 ' + msg.text;
+    container.appendChild(box);
+    log('Indice révélé.', 'warn');
+  } else {
+    showNotif(msg.message || 'Aucun indice disponible', 'error');
   }
-  function resumeTimer() {
-    if (pauseStartTime) {
-      startTimestamp += (Date.now() - pauseStartTime); // récupère le temps pausé
-      pauseStartTime = null;
-    }
-    if (startTimestamp) startTimerLoop();
+});
+
+WS.on('timer', (msg) => { setTimer(msg.timeLeft); });
+
+WS.on('game:over', (msg) => {
+  if (msg.win) return;
+  const overlay = document.getElementById('end-overlay');
+  const card = document.getElementById('end-card');
+  overlay.classList.add('visible');
+  card.className = 'lose';
+  document.getElementById('end-title').textContent = '💀 DÉFAITE';
+  document.getElementById('end-reason').textContent = msg.reason;
+  document.getElementById('end-debrief').textContent = msg.debrief || '';
+});
+
+WS.on('mission:complete', (msg) => {
+  const overlay = document.getElementById('mission-complete-overlay');
+  overlay.classList.add('visible');
+  document.getElementById('mc-stars').textContent = '★'.repeat(msg.stars) + '☆'.repeat(3 - msg.stars);
+  document.getElementById('mc-debrief').textContent = msg.debrief;
+  const endingEl = document.getElementById('mc-ending');
+  if (msg.ending) {
+    endingEl.style.display = 'block';
+    endingEl.textContent = `🏁 FIN DE CAMPAGNE : ${msg.ending.title} — ${msg.ending.text}`;
+  } else {
+    endingEl.style.display = 'none';
   }
+  log('Mission accomplie ! Station réactivée.', 'ok');
+});
 
+WS.on('mission:aborted', () => {
+  window.location.href = 'hub.html';
+});
 
-  GameDB.onStateChange(state => {
-    if (state.phase === 'playing') {
-      if (!introShown && state.startTimestamp) {
-        introShown = true;
-        if (state.timeLimit) timeLimit = state.timeLimit;
-        document.getElementById('start-overlay').style.display = 'none';
-        document.getElementById('game-area').style.display = 'grid';
-        if (state.puzzlesSeed && PUZZLES.length === 0) initPuzzles(state.puzzlesSeed);
-        startTimestamp = state.startTimestamp;
-        startTimerLoop();
-        AudioManager.gameStart();
-        Scenario.play('intro', () => { resumeTimer(); showPuzzle(0); },
-          { isController: true, onStart: pauseTimer });
-        return;
-      }
+WS.on('player:disconnected', () => {
+  showNotif('⚠ L\'autre joueur s\'est déconnecté', 'error');
+  log('Opérateur déconnecté !', 'error');
+});
 
-      const newIdx = state.currentPuzzle || 0;
-      if (newIdx !== lastPuzzleIndex && lastPuzzleIndex >= 0 && newIdx > 0) {
-        AudioManager.puzzleNext();
-        Scenario.play('cutscene_' + lastPuzzleIndex,
-          () => { resumeTimer(); showPuzzle(newIdx); },
-          { isController: true, onStart: pauseTimer });
-        return;
-      }
-      if (newIdx !== lastPuzzleIndex) showPuzzle(newIdx);
-    }
+WS.on('player:reconnected', () => {
+  showNotif('✅ L\'autre joueur est reconnecté', 'success');
+});
 
-    if (state.phase === 'finished') {
-      clearInterval(timerInterval);
-      AudioManager.stopAlarm();
-      const outroId = state.win ? 'outro_win' : 'outro_lose';
-      state.win ? AudioManager.victory() : AudioManager.defeat();
-      Scenario.play(outroId, () => {
-        const overlay = document.getElementById('end-overlay');
-        const card    = document.getElementById('end-card');
-        overlay.classList.add('visible');
-        card.className = state.win ? 'win' : 'lose';
-        document.getElementById('end-title').textContent  = state.win ? '🏆 VICTOIRE' : '💀 DÉFAITE';
-        document.getElementById('end-reason').textContent = state.reason;
-      }, { isController: true });
-    }
-  });
+WS.on('error', (msg) => {
+  showNotif('⚠ ' + msg.message, 'error');
+});
 
-  GameDB.onResult(result => {
-    if (result.valid) { AudioManager.success(); showNotif('✅ ' + result.message, 'success'); log(result.message, 'ok'); }
-    else              { AudioManager.error();   showNotif('❌ ' + result.message, 'error');   log(result.message, 'error'); }
-  });
-
-  GameDB.onDisconnect(() => {
-    AudioManager.disconnect();
-    showNotif('⚠ L\'Opérateur s\'est déconnecté', 'error');
-    log('Opérateur déconnecté !', 'error');
-  });
-}
-
-document.getElementById('btn-start').addEventListener('click', () => {
-  GameDB.startGame();
+// ── Actions locales ──
+document.getElementById('btn-hub').addEventListener('click', () => { location.href = 'hub.html'; });
+document.getElementById('btn-end-hub').addEventListener('click', () => { location.href = 'hub.html'; });
+document.getElementById('btn-hint').addEventListener('click', () => { WS.send({ type: 'hint:request' }); });
+document.getElementById('btn-abandon').addEventListener('click', () => {
+  if (confirm('Abandonner la mission en cours et revenir au Hub ?')) {
+    WS.send({ type: 'hub:return' });
+  }
 });

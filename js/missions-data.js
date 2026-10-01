@@ -1,7 +1,8 @@
 /**
- * missions.js — Définitions de la campagne "STATION ZÉRO"
+ * missions-data.js — Définitions de la campagne "STATION ZÉRO"
  *
- * Modèle de données autoritaire côté serveur. Chaque mission contient :
+ * Modèle de données autoritaire, exécuté dans le navigateur (plus de serveur Node).
+ * Chaque mission contient :
  *  - des métadonnées de scénario (briefing, debrief, icône, difficulté)
  *  - des conditions de déverrouillage (unlockRequires)
  *  - une liste de puzzles (mêmes types que le v1 + symbol_code / wire_panel / choice)
@@ -10,7 +11,11 @@
  * Les ressources de campagne sont : integrity (intégrité structurelle),
  * trust (confiance de l'équipage) et intel (renseignement).
  * Elles évoluent via les puzzles de type "choice" et les récompenses de mission.
+ *
+ * Exposé comme variable globale `MissionsData` (chargé via <script> classique,
+ * sans module ni bundler), dans le même style que les autres scripts clients.
  */
+const MissionsData = (() => {
 
 const RESOURCE_KEYS = ['integrity', 'trust', 'intel'];
 
@@ -606,4 +611,5 @@ const ENDINGS = [
   }
 ];
 
-module.exports = { MISSIONS, ENDINGS, RESOURCE_KEYS, INITIAL_RESOURCES };
+  return { MISSIONS, ENDINGS, RESOURCE_KEYS, INITIAL_RESOURCES };
+})();
