@@ -3,6 +3,7 @@ const GameDB = (() => {
   let db = null;
   let roomCode = null;
   let myRole = null;
+  let authReady = null;
 
   function init() {
     if (FIREBASE_CONFIG.apiKey === 'VOTRE_API_KEY') {
@@ -18,6 +19,16 @@ const GameDB = (() => {
       firebase.initializeApp(FIREBASE_CONFIG);
     }
     db = firebase.database();
+    // Connexion anonyme : les règles Realtime Database exigent auth != null
+    authReady = firebase.auth().currentUser
+      ? Promise.resolve(firebase.auth().currentUser)
+      : firebase.auth().signInAnonymously().then(cred => cred.user);
+    return authReady;
+  }
+
+  // À appeler avant toute lecture/écriture pour garantir que le jeton est prêt
+  function ready() {
+    return authReady || Promise.reject(new Error('GameDB.init() non appelé'));
   }
 
   function genCode() {
@@ -27,6 +38,7 @@ const GameDB = (() => {
 
   // ── Appelé sur technician.html / operator.html pour rétablir la présence ──
   async function rejoinRoom(code, role) {
+    await ready();
     roomCode = code;
     myRole = role;
     // Rétablir la présence après la navigation de page
@@ -35,6 +47,7 @@ const GameDB = (() => {
   }
 
   async function createRoom() {
+    await ready();
     let code, attempts = 0;
     do {
       code = genCode();
@@ -52,6 +65,7 @@ const GameDB = (() => {
   }
 
   async function joinRoom(code) {
+    await ready();
     code = code.toUpperCase().trim();
     const snap = await db.ref(`rooms/${code}/meta`).once('value');
     if (!snap.exists()) throw new Error('Code de room invalide');
@@ -158,6 +172,6 @@ const GameDB = (() => {
   function getRole()      { return myRole; }
   function getCode()      { return roomCode; }
 
-  return { init, rejoinRoom, createRoom, joinRoom, startGame, submitResult, triggerTimeout, cleanupRoom, onRoomReady, onStateChange, onResult, onCinematicLine, setCinematicLine, onDisconnect, getDb, getRole, getCode };
+  return { init, ready, rejoinRoom, createRoom, joinRoom, startGame, submitResult, triggerTimeout, cleanupRoom, onRoomReady, onStateChange, onResult, onCinematicLine, setCinematicLine, onDisconnect, getDb, getRole, getCode };
 })();
 
