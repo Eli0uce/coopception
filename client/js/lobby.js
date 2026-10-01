@@ -6,6 +6,47 @@ function switchTab(name) {
   document.getElementById('tab-join').classList.toggle('active', name==='join');
 }
 
+let authenticated = false;
+
+function setAuthStatus(text, error = false) {
+  const el = document.getElementById('auth-status');
+  el.textContent = text;
+  el.style.color = error ? 'var(--red)' : 'var(--green)';
+}
+
+function requireAuth(action) {
+  if (!authenticated) {
+    setAuthStatus('⚠ Connectez-vous avant de créer ou rejoindre une room.', true);
+    return;
+  }
+  action();
+}
+
+StationAuth.init().then(user => {
+  authenticated = !!user;
+  if (user) {
+    document.getElementById('auth-form').style.display = 'none';
+    document.getElementById('auth-user').style.display = 'block';
+    document.getElementById('auth-email-label').textContent = `CONNECTÉ : ${user.email}`;
+  }
+}).catch(error => setAuthStatus(StationAuth.errorMessage(error), true));
+
+document.getElementById('auth-login').addEventListener('click', async () => {
+  try {
+    await StationAuth.signIn(document.getElementById('auth-email').value.trim(), document.getElementById('auth-password').value);
+    location.reload();
+  } catch (error) { setAuthStatus(StationAuth.errorMessage(error), true); }
+});
+
+document.getElementById('auth-register').addEventListener('click', async () => {
+  try {
+    await StationAuth.signUp(document.getElementById('auth-email').value.trim(), document.getElementById('auth-password').value);
+    location.reload();
+  } catch (error) { setAuthStatus(StationAuth.errorMessage(error), true); }
+});
+
+document.getElementById('auth-logout').addEventListener('click', () => StationAuth.signOut().then(() => location.reload()));
+
 WS.connect();
 
 WS.on('room:created', (msg) => {
@@ -22,9 +63,8 @@ WS.on('room:joined', (msg) => {
 });
 
 WS.on('room:ready', () => {
-  const role = sessionStorage.getItem('sz_role');
   setTimeout(() => {
-    window.location.href = role === 'technician' ? 'technician.html' : 'operator.html';
+    window.location.href = '/hub';
   }, 800);
 });
 
@@ -33,7 +73,7 @@ WS.on('error', (msg) => {
 });
 
 function createRoom() {
-  WS.send({ type: 'room:create' });
+  requireAuth(() => StationAuth.currentUser().then(user => WS.send({ type: 'room:create', userId: user.uid })));
 }
 
 function joinRoom() {
@@ -43,7 +83,7 @@ function joinRoom() {
     return;
   }
   document.getElementById('error-msg').textContent = '';
-  WS.send({ type: 'room:join', code });
+  requireAuth(() => StationAuth.currentUser().then(user => WS.send({ type: 'room:join', code, userId: user.uid })));
 }
 
 // Permettre de rejoindre avec Entrée
@@ -52,4 +92,3 @@ document.getElementById('input-code').addEventListener('keydown', e => {
   // Forcer majuscules
   setTimeout(() => { e.target.value = e.target.value.toUpperCase(); }, 0);
 });
-

@@ -38,23 +38,42 @@
 
   <!-- ── Main ── -->
   <main class="hub-main">
+
+    <div id="ending-banner" class="ending-banner" style="display:none;">
+      <div class="ending-title" id="ending-title"></div>
+      <div class="ending-text" id="ending-text"></div>
+    </div>
+
+    <div class="section-title">ÉTAT DE LA CAMPAGNE</div>
+    <div class="resource-panel" id="resource-panel">
+      <!-- Généré par hub.js -->
+    </div>
+
     <div class="section-title">MISSIONS DISPONIBLES</div>
     <div class="mission-list" id="mission-list">
-      <!-- Généré par hub.js -->
+      <div class="hub-loading">◌ CONNEXION AU RÉSEAU DE LA STATION…</div>
     </div>
   </main>
 
   <!-- ── Footer ── -->
   <footer class="hub-footer">
-    <span>STATION ZÉRO — PROTOCOLE COOPÉRATIF v1.0</span>
-    <button class="lobby-link" id="btn-lobby">↩ RETOUR AU LOBBY</button>
+    <span>STATION ZÉRO — PROTOCOLE COOPÉRATIF v2.0</span>
+    <div class="hub-footer-actions">
+      <button class="lobby-link" id="btn-reset">↺ RÉINITIALISER LA CAMPAGNE</button>
+      <button class="lobby-link" id="btn-lobby">↩ RETOUR AU LOBBY</button>
+    </div>
   </footer>
 
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/firebase-auth.js"></script>
+<script src="js/ws-client.js"></script>
 <script src="js/hub.js"></script>
 <!-- Scène Three.js chargée en module (après le DOM) -->
 <script type="module" src="js/hub-scene.js"></script>
 </body>
 </html>
-

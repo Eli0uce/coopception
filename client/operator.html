@@ -20,23 +20,25 @@
   <div style="font-size:13px;color:var(--green);letter-spacing:2px;text-align:center;max-width:400px;line-height:1.8;">
     Vous contrôlez les panneaux physiques.<br>Attendez les instructions du Technicien.
   </div>
-  <div class="blink" style="color:var(--amber);letter-spacing:3px;font-size:14px;">⏳ EN ATTENTE DU LANCEMENT...</div>
+  <div class="blink" style="color:var(--amber);letter-spacing:3px;font-size:14px;">⏳ SYNCHRONISATION AVEC LA STATION...</div>
 </div>
 
 <div id="end-overlay">
   <div id="end-card">
     <h1 id="end-title">VICTOIRE</h1>
     <p id="end-reason"></p>
-    <button class="btn" onclick="location.href='/'">↩ RETOUR AU LOBBY</button>
+    <p id="end-debrief" style="font-size:13px;color:var(--amber);max-width:380px;"></p>
+    <button class="btn" id="btn-end-hub">↩ RETOUR AU HUB</button>
   </div>
 </div>
 
 <!-- Overlay Mission Réussie -->
 <div id="mission-complete-overlay">
   <div id="mission-complete-card">
-    <div class="mc-stars">★ ★ ★</div>
+    <div class="mc-stars" id="mc-stars">★ ★ ★</div>
     <h1>MISSION RÉUSSIE</h1>
-    <p class="mc-subtitle">STATION RÉACTIVÉE AVEC SUCCÈS<br>RETOUR AU QUARTIER GÉNÉRAL</p>
+    <p class="mc-subtitle" id="mc-debrief">STATION RÉACTIVÉE AVEC SUCCÈS<br>RETOUR AU QUARTIER GÉNÉRAL</p>
+    <p class="mc-subtitle" id="mc-ending" style="display:none;color:var(--amber);"></p>
     <button class="btn" id="btn-hub">🚀 VERS LE HUB SPATIAL</button>
   </div>
 </div>
@@ -47,6 +49,8 @@
     <div id="timer-display">15:00</div>
     <div class="module-name" id="module-name">MODULE ???</div>
   </div>
+
+  <div class="mission-banner" id="mission-banner"></div>
 
   <div class="oper-main">
     <div class="panel-block" id="control-panel" data-title="PANNEAU DE CONTRÔLE">
@@ -60,6 +64,10 @@
   <div class="oper-footer">
     <div class="puzzle-progress" id="puzzle-dots"></div>
     <div style="font-size:12px;color:var(--amber-dim);" id="footer-status">EN ATTENTE...</div>
+    <div class="footer-actions">
+      <button class="btn small" id="btn-hint">💡 INDICE</button>
+      <button class="btn small danger" id="btn-abandon">🏠 ABANDONNER</button>
+    </div>
   </div>
 </div>
 
@@ -74,9 +82,13 @@
   <button id="chat-toggle">💬 COMM — MASQUER</button>
 </div>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+<script src="js/firebase-config.js"></script>
+<script src="js/firebase-auth.js"></script>
 <script src="js/ws-client.js"></script>
 <script src="js/chat.js"></script>
 <script src="js/operator.js"></script>
 </body>
 </html>
-
